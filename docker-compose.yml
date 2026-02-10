@@ -1,0 +1,124 @@
+# ============================================
+# LogisticsTrack — Docker Compose (Sviluppo)
+# ============================================
+
+services:
+
+  # --- MQTT Broker ---
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: lt_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - lt_net
+
+  # --- Database ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: lt_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-logistics_track}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - lt_net
+
+  # --- Backend API ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lt_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+    depends_on:
+      - postgres
+      - mosquitto
+    networks:
+      - lt_net
+
+  # --- Video Analyzer ---
+  video_analyzer:
+    build:
+      context: ./video_analyzer
+      dockerfile: Dockerfile
+    container_name: lt_video_analyzer
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./video_analyzer/src:/app/src
+      - ./video_analyzer/models:/app/models
+      - ./video_analyzer/data:/app/data
+    depends_on:
+      - mosquitto
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - lt_net
+
+  # --- Frontend (dev con hot-reload) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lt_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+    depends_on:
+      - backend
+    networks:
+      - lt_net
+
+  # --- PgAdmin (opzionale, profilo separato) ---
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: lt_pgadmin
+    restart: unless-stopped
+    profiles:
+      - tools
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@logistics.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    networks:
+      - lt_net
+
+volumes:
+  postgres_data:
+  mosquitto_data:
+  mosquitto_log:
+
+networks:
+  lt_net:
+    driver: bridge

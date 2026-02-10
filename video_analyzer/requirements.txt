@@ -1,0 +1,8 @@
+# Video Analyzer dependencies
+ultralytics>=8.2.0
+# In dev locale su Windows: opencv-python (con GUI)
+# In Docker/produzione: opencv-python-headless
+opencv-python>=4.9.0
+paho-mqtt>=2.1.0
+numpy>=1.26.0
+python-dotenv>=1.0.0

@@ -1,0 +1,47 @@
+# ============================================
+# LogisticsTrack .gitignore
+# ============================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+
+# --- Ambiente ---
+.env
+
+# --- Node.js ---
+node_modules/
+dist/
+dist-ssr/
+
+# --- YOLO Models (pesanti, scaricati a runtime) ---
+video_analyzer/models/*.pt
+video_analyzer/models/*.onnx
+video_analyzer/models/*.engine
+
+# --- Video di test (pesanti) ---
+video_analyzer/data/videos/*.mp4
+video_analyzer/data/videos/*.avi
+
+# --- Docker volumi locali ---
+postgres_data/
+mosquitto/data/
+mosquitto/log/
+
+# --- IDE ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+*.tar
+
+# --- Log ---
+*.log
+logs/
