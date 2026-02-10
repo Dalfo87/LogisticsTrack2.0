@@ -5,14 +5,20 @@ Configurazione centralizzata. Legge da variabili ambiente o usa defaults.
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Cerca il .env nella root del progetto (due livelli su da src/)
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env_path)
 
 @dataclass
 class VideoAnalyzerConfig:
     """Configurazione completa del Video Analyzer."""
 
     # Sorgente video: path file MP4 o URL RTSP
-    video_source: str = os.getenv("VIDEO_SOURCE", "data/videos/test.mp4")
+    video_source: str = os.getenv("VIDEO_SOURCE","data/videos/Videotest1.mp4")
 
     # Modello YOLO
     yolo_model: str = os.getenv("YOLO_MODEL", "yolov8n.pt")
