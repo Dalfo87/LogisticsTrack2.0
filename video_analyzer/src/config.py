@@ -1,6 +1,6 @@
 """
 LogisticsTrack — Video Analyzer Configuration
-Configurazione centralizzata. Legge da variabili ambiente o usa defaults.
+Configurazione centralizzata. Legge da file .env e variabili ambiente.
 """
 
 import os
@@ -13,12 +13,13 @@ from dotenv import load_dotenv
 _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(_env_path)
 
+
 @dataclass
 class VideoAnalyzerConfig:
     """Configurazione completa del Video Analyzer."""
 
     # Sorgente video: path file MP4 o URL RTSP
-    video_source: str = os.getenv("VIDEO_SOURCE","data/videos/Videotest1.mp4")
+    video_source: str = os.getenv("VIDEO_SOURCE", "data/videos/test.mp4")
 
     # Modello YOLO
     yolo_model: str = os.getenv("YOLO_MODEL", "yolov8n.pt")
@@ -45,6 +46,10 @@ class VideoAnalyzerConfig:
 
     # RTSP reconnection
     rtsp_reconnect_delay: int = int(os.getenv("RTSP_RECONNECT_DELAY", "5"))
+
+    # ROI
+    roi_file: str = os.getenv("ROI_FILE", "data/rois.json")
+    camera_id: str = os.getenv("CAMERA_ID", "CAM_DEV_01")
 
     def __post_init__(self) -> None:
         """Parsing target_classes da env se presente."""

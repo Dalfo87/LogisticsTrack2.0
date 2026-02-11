@@ -1,0 +1,41 @@
+{
+    "_comment": "ROI di esempio per LogisticsTrack. Coordinate in pixel assoluti (frame 1280x720).",
+    "rois": [
+        {
+            "id": "ROI_A01",
+            "name": "Corsia A-01",
+            "aisle_id": "A-01",
+            "camera_id": "CAM_DEV_01",
+            "points": [[200, 200], [500, 200], [500, 550], [200, 550]],
+            "reference_point": "bottom_center",
+            "parent_id": null,
+            "color": [0, 255, 0],
+            "is_active": true,
+            "dwell_threshold_sec": 5.0
+        },
+        {
+            "id": "ROI_A02",
+            "name": "Corsia A-02",
+            "aisle_id": "A-02",
+            "camera_id": "CAM_DEV_01",
+            "points": [[600, 200], [900, 200], [900, 550], [600, 550]],
+            "reference_point": "bottom_center",
+            "parent_id": null,
+            "color": [255, 255, 0],
+            "is_active": true,
+            "dwell_threshold_sec": 5.0
+        },
+        {
+            "id": "ROI_ZONA_NORD",
+            "name": "Zona Nord",
+            "aisle_id": "NORD",
+            "camera_id": "CAM_DEV_01",
+            "points": [[100, 100], [1000, 100], [1000, 600], [100, 600]],
+            "reference_point": "bottom_center",
+            "parent_id": null,
+            "color": [100, 100, 255],
+            "is_active": false,
+            "_comment": "ROI padre disabilitata — attivare per test gerarchia"
+        }
+    ]
+}
