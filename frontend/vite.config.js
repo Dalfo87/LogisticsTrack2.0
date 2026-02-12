@@ -13,7 +13,11 @@ export default defineConfig({
     // Proxy API calls verso il backend in dev
     proxy: {
       '/api': {
-        target: 'http://lt_backend:8000',
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },
