@@ -196,19 +196,21 @@ class EventManager:
         Converte un ROIEvent in payload JSON per MQTT.
 
         Schema versionato per garantire compatibilità con il backend.
+        Converte esplicitamente tipi numpy in tipi Python nativi
+        (YOLO restituisce numpy.int64/float64 non serializzabili da json.dumps).
         """
         return {
             "schema_version": PAYLOAD_SCHEMA_VERSION,
             "timestamp": datetime.fromtimestamp(event.timestamp, tz=timezone.utc).isoformat(),
-            "event_type": event.event_type,
-            "camera_id": event.camera_id,
-            "roi_id": event.roi_id,
-            "roi_name": event.roi_name,
-            "aisle_id": event.aisle_id,
-            "track_id": event.track_id,
-            "confidence": round(event.confidence, 3),
-            "bbox": list(event.bbox),
-            "reference_point": event.reference_point_used,
-            "dwell_seconds": round(event.dwell_seconds, 2),
-            "parent_roi_id": event.parent_roi_id,
+            "event_type": str(event.event_type),
+            "camera_id": str(event.camera_id),
+            "roi_id": str(event.roi_id),
+            "roi_name": str(event.roi_name),
+            "aisle_id": str(event.aisle_id),
+            "track_id": int(event.track_id),
+            "confidence": float(round(event.confidence, 3)),
+            "bbox": [int(x) for x in event.bbox],
+            "reference_point": str(event.reference_point_used),
+            "dwell_seconds": float(round(event.dwell_seconds, 2)),
+            "parent_roi_id": str(event.parent_roi_id) if event.parent_roi_id else None,
         }
