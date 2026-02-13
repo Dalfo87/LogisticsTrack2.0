@@ -52,6 +52,7 @@ class MQTTListener:
     async def start(self) -> None:
         """Avvia il listener MQTT e il task di persistenza."""
         self._running = True
+        self._loop = asyncio.get_running_loop()
 
         # Avvia il task di persistenza asincrono
         self._persist_task = asyncio.create_task(self._persist_loop())
@@ -114,9 +115,8 @@ class MQTTListener:
         """Riceve messaggio MQTT e lo mette in coda per la persistenza async."""
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
-            # Metti in coda (thread-safe grazie a asyncio.Queue con call_soon_threadsafe)
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(self._event_queue.put_nowait, payload)
+            # Thread-safe: usa il loop salvato in start()
+            self._loop.call_soon_threadsafe(self._event_queue.put_nowait, payload)
             logger.debug(f"Evento ricevuto: {payload.get('event_type')} track={payload.get('track_id')}")
         except json.JSONDecodeError as e:
             logger.error(f"Payload MQTT non valido: {e}")
