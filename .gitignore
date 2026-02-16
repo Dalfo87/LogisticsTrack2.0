@@ -19,9 +19,9 @@ dist/
 dist-ssr/
 
 # --- YOLO Models (pesanti, scaricati a runtime) ---
-video_analyzer/models/*.pt
-video_analyzer/models/*.onnx
-video_analyzer/models/*.engine
+video_analyzer/*/*.pt
+video_analyzer/*/*.onnx
+video_analyzer/*/*.engine
 
 # --- Video di test (pesanti) ---
 video_analyzer/data/videos/*.mp4
