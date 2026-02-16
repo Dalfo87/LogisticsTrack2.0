@@ -8,6 +8,7 @@ import AppLayout from './components/Layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import Events from './pages/Events';
 import Cameras from './pages/Cameras';
+import ROIEditor from './pages/ROIEditor';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/events" element={<Events />} />
             <Route path="/cameras" element={<Cameras />} />
+            <Route path="/roi-editor" element={<ROIEditor />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

@@ -22,7 +22,7 @@ class VideoAnalyzerConfig:
     video_source: str = os.getenv("VIDEO_SOURCE", "data/videos/test.mp4")
 
     # Modello YOLO
-    yolo_model: str = os.getenv("YOLO_MODEL", "yolov8n.pt")
+    yolo_model: str = os.getenv("YOLO_MODEL", "yolo26l.pt")
     yolo_confidence: float = float(os.getenv("YOLO_CONFIDENCE", "0.4"))
     yolo_device: str = os.getenv("YOLO_DEVICE", "0")  # "0" = GPU, "cpu" = CPU
 

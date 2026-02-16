@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.database import init_db, close_db
-from routers import events, cameras
+from routers import events, cameras, rois
 from services.mqtt_listener import MQTTListener
 
 logging.basicConfig(
@@ -76,6 +76,7 @@ app.add_middleware(
 # Routers
 app.include_router(events.router)
 app.include_router(cameras.router)
+app.include_router(rois.router)
 
 
 @app.get("/health")

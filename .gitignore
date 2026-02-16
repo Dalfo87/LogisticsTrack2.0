@@ -31,6 +31,8 @@ video_analyzer/data/videos/*.avi
 postgres_data/
 mosquitto/data/
 mosquitto/log/
+.claude/
+runs/
 
 # --- IDE ---
 .vscode/*

@@ -1,6 +1,9 @@
 """
 LogisticsTrack — Object Detector & Tracker
-Usa Ultralytics YOLOv8 per detection e tracking di muletti e pallet.
+Usa Ultralytics YOLO26 per detection e tracking di muletti e pallet.
+
+YOLO26 è NMS-free (end-to-end), più veloce su CPU rispetto a YOLOv8/YOLO11.
+Stessa API Ultralytics — il cambio modello è trasparente.
 """
 
 import logging
@@ -29,10 +32,11 @@ class Detection:
 
 class Detector:
     """
-    Motore di detection e tracking basato su YOLOv8.
+    Motore di detection e tracking basato su YOLO26.
 
     Utilizza il tracking integrato di Ultralytics (ByteTrack o BoTSORT)
     per assegnare ID persistenti agli oggetti tra frame consecutivi.
+    YOLO26 usa inferenza NMS-free nativa per latenza ridotta.
     """
 
     # Colori per visualizzazione (per track_id % len)

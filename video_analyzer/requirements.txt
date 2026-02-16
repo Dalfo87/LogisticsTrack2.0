@@ -1,5 +1,5 @@
 # Video Analyzer dependencies
-ultralytics>=8.2.0
+ultralytics>=8.4.0
 # In dev locale su Windows: opencv-python (con GUI)
 # In Docker/produzione: opencv-python-headless
 opencv-python>=4.9.0

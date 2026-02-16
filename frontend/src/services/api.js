@@ -112,3 +112,32 @@ export async function deleteCamera(cameraId) {
     method: 'DELETE',
   });
 }
+
+// ---------------------------------------------------------------------------
+// ROIs
+// ---------------------------------------------------------------------------
+
+export async function fetchRois(cameraId = null) {
+  const query = cameraId ? `?camera_id=${cameraId}` : '';
+  return request(`/rois${query}`);
+}
+
+export async function createRoi(data) {
+  return request('/rois', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateRoi(roiId, data) {
+  return request(`/rois/${roiId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteRoi(roiId) {
+  return request(`/rois/${roiId}`, {
+    method: 'DELETE',
+  });
+}
