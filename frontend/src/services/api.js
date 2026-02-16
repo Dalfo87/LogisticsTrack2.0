@@ -113,31 +113,68 @@ export async function deleteCamera(cameraId) {
   });
 }
 
+/**
+ * URL dello snapshot di una camera (immagine JPEG).
+ * Non passa per request() perché restituisce un'immagine, non JSON.
+ */
+export function getCameraSnapshotUrl(cameraId) {
+  return `${BASE}/cameras/${cameraId}/snapshot`;
+}
+
 // ---------------------------------------------------------------------------
 // ROIs
 // ---------------------------------------------------------------------------
 
-export async function fetchRois(cameraId = null) {
+/**
+ * Lista ROI, con filtro opzionale per camera.
+ */
+export async function fetchROIs(cameraId = null) {
   const query = cameraId ? `?camera_id=${cameraId}` : '';
   return request(`/rois${query}`);
 }
 
-export async function createRoi(data) {
+/**
+ * Dettaglio singola ROI.
+ */
+export async function fetchROI(roiId) {
+  return request(`/rois/${roiId}`);
+}
+
+/**
+ * Crea una nuova ROI.
+ */
+export async function createROI(data) {
   return request('/rois', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function updateRoi(roiId, data) {
+/**
+ * Aggiorna una ROI esistente.
+ */
+export async function updateROI(roiId, data) {
   return request(`/rois/${roiId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteRoi(roiId) {
+/**
+ * Elimina una ROI.
+ */
+export async function deleteROI(roiId) {
   return request(`/rois/${roiId}`, {
     method: 'DELETE',
+  });
+}
+
+/**
+ * Esporta le ROI di una camera verso il video analyzer.
+ * Scrive rois.json e invia segnale MQTT di reload.
+ */
+export async function exportROIs(cameraId) {
+  return request(`/rois/export/${cameraId}`, {
+    method: 'POST',
   });
 }

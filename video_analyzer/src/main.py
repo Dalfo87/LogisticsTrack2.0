@@ -126,6 +126,13 @@ def main() -> None:
                         f"conf={evt.confidence:.0%}"
                     )
 
+            # Hot-reload ROI (segnale dal backend via MQTT)
+            if event_manager.roi_reload_requested:
+                roi_engine.clear_all()
+                roi_count = roi_engine.load_from_file(config.roi_file)
+                event_manager.acknowledge_reload()
+                logger.info(f"ROI ricaricate da segnale MQTT: {roi_count} definizioni")
+
             # Calcolo FPS reali
             fps_counter += 1
             elapsed = time.time() - fps_timer

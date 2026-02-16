@@ -5,7 +5,7 @@ FastAPI entry point con lifecycle management.
 Avvia:
 - Connessione PostgreSQL (pool async)
 - MQTT Listener (sottoscrizione eventi video analyzer)
-- API REST (events, cameras)
+- API REST (events, cameras, rois)
 """
 
 import logging

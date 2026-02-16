@@ -43,6 +43,8 @@ class EventManager:
         self._client: Optional[mqtt.Client] = None
         self._connected: bool = False
         self._event_count: int = 0
+        self._roi_reload_requested: bool = False
+        self._control_topic: str = "logistics/control/reload_rois"
 
     # -------------------------------------------------------------------
     # Connessione MQTT
@@ -66,6 +68,7 @@ class EventManager:
             self._client.on_connect = self._on_connect
             self._client.on_disconnect = self._on_disconnect
             self._client.on_publish = self._on_publish
+            self._client.on_message = self._on_message
 
             # Connessione (non bloccante con loop_start)
             logger.info(
@@ -115,6 +118,9 @@ class EventManager:
         if reason_code == 0:
             self._connected = True
             logger.info("MQTT: connesso al broker.")
+            # Sottoscrivi al topic di controllo per hot-reload ROI
+            client.subscribe(self._control_topic, qos=1)
+            logger.info(f"MQTT: sottoscritto a {self._control_topic} per hot-reload ROI.")
         else:
             self._connected = False
             logger.error(f"MQTT: connessione rifiutata, codice={reason_code}")
@@ -126,6 +132,25 @@ class EventManager:
 
     def _on_publish(self, client, userdata, mid, reason_codes=None, properties=None) -> None:
         logger.debug(f"MQTT: messaggio {mid} pubblicato con successo.")
+
+    def _on_message(self, client, userdata, message) -> None:
+        """Callback per messaggi ricevuti (topic di controllo)."""
+        if message.topic == self._control_topic:
+            logger.info(f"MQTT: ricevuto segnale di reload ROI: {message.payload.decode()}")
+            self._roi_reload_requested = True
+
+    # -------------------------------------------------------------------
+    # Hot-reload ROI
+    # -------------------------------------------------------------------
+
+    @property
+    def roi_reload_requested(self) -> bool:
+        """True se è stato ricevuto un segnale di reload ROI."""
+        return self._roi_reload_requested
+
+    def acknowledge_reload(self) -> None:
+        """Conferma che il reload ROI è stato eseguito."""
+        self._roi_reload_requested = False
 
     # -------------------------------------------------------------------
     # Pubblicazione eventi

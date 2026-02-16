@@ -20,7 +20,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/events" element={<Events />} />
             <Route path="/cameras" element={<Cameras />} />
-            <Route path="/roi-editor" element={<ROIEditor />} />
+            <Route path="/rois" element={<ROIEditor />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

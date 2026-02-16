@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   CalendarClock,
   Camera,
-  PenTool,
+  Layers,
   Settings,
 } from 'lucide-react';
 
@@ -37,9 +37,9 @@ export const navigationItems = [
     roles: ['admin'],
   },
   {
-    path: '/roi-editor',
-    label: 'Editor ROI',
-    icon: PenTool,
+    path: '/rois',
+    label: 'ROI Editor',
+    icon: Layers,
     roles: ['admin'],
   },
   {
