@@ -5,7 +5,10 @@ API REST per gestione camere.
 
 import logging
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,3 +107,66 @@ async def delete_camera(
     await session.commit()
 
     logger.info(f"Camera eliminata: {camera_id}")
+
+
+# ---------------------------------------------------------------------------
+# Snapshot
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{camera_id}/snapshot")
+async def get_camera_snapshot(
+    camera_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """
+    Cattura un singolo frame dalla camera RTSP e lo restituisce come JPEG.
+    Se la camera non è raggiungibile, restituisce un placeholder grigio.
+    """
+    result = await session.execute(select(Camera).where(Camera.id == camera_id))
+    camera = result.scalar_one_or_none()
+
+    if camera is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' non trovata")
+
+    frame = None
+
+    # Tenta di catturare un frame RTSP
+    if camera.rtsp_url:
+        try:
+            cap = cv2.VideoCapture(camera.rtsp_url)
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    frame = None
+            cap.release()
+        except Exception as e:
+            logger.warning(f"Errore cattura snapshot da {camera_id}: {e}")
+            frame = None
+
+    # Fallback: immagine placeholder grigia
+    if frame is None:
+        frame = np.full((720, 1280, 3), 40, dtype=np.uint8)  # Grigio scuro
+        text = "Camera non raggiungibile"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text_size = cv2.getTextSize(text, font, 1.0, 2)[0]
+        x = (1280 - text_size[0]) // 2
+        y = (720 + text_size[1]) // 2
+        cv2.putText(frame, text, (x, y), font, 1.0, (120, 120, 120), 2)
+
+        # Nome camera
+        cv2.putText(frame, f"[{camera_id}]", (x + 30, y + 40), font, 0.6, (80, 80, 80), 1)
+
+    # Resize a 1280x720 se necessario
+    if frame.shape[:2] != (720, 1280):
+        frame = cv2.resize(frame, (1280, 720))
+
+    # Codifica JPEG
+    _, jpeg_data = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+    return Response(
+        content=jpeg_data.tobytes(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )

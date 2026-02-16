@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   CalendarClock,
   Camera,
+  Layers,
   Settings,
 } from 'lucide-react';
 
@@ -33,6 +34,12 @@ export const navigationItems = [
     path: '/cameras',
     label: 'Camere',
     icon: Camera,
+    roles: ['admin'],
+  },
+  {
+    path: '/rois',
+    label: 'ROI Editor',
+    icon: Layers,
     roles: ['admin'],
   },
   {
