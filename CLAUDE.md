@@ -45,13 +45,14 @@ Camera RTSP / File MP4
 
 ### Servizi Docker
 
-| Servizio         | Porta | Descrizione                        |
-|------------------|-------|------------------------------------|
-| video_analyzer   | —     | Pipeline YOLO, no porta esposta    |
-| backend          | 8000  | FastAPI REST API                   |
-| frontend         | 5173  | React dev server (dev) / nginx (prod) |
-| mosquitto        | 1883  | MQTT broker                        |
-| postgres         | 5432  | Database eventi                    |
+| Servizio         | Porta | Descrizione                                      |
+|------------------|-------|--------------------------------------------------|
+| video_analyzer   | —     | Pipeline YOLO, no porta esposta                  |
+| backend          | 8000  | FastAPI REST API                                 |
+| frontend         | 5173  | React dev server (dev) / nginx (prod)            |
+| mosquitto        | 1883  | MQTT broker                                      |
+| postgres         | 5432  | Database eventi                                  |
+| pgadmin          | 8080  | Admin DB (opzionale, profile=tools)              |
 
 ---
 
@@ -91,7 +92,8 @@ Single-user per ora. Utenti target: security management e amministratori.
 - **3 tipi di evento**: `roi_enter`, `roi_exit`, `dwell_time` (soglia configurabile)
 - **Tracker persi**: tolleranza 1s prima di generare exit (evita falsi exit per frame drop)
 - ROI definite in coordinate pixel assolute nel piano immagine (no calibrazione camera)
-- Caricamento ROI da file JSON (`data/rois.json`), in futuro via API/frontend
+- Caricamento ROI da file JSON (`data/rois.json`) nel video_analyzer
+- Gestione ROI via REST API (`/api/rois`) e frontend ROI Editor (Fase 5 completata)
 
 ### 8. Event Manager MQTT (Fase 2)
 - paho-mqtt 2.x con MQTTv5, QoS 1 (at least once)
@@ -122,6 +124,7 @@ Single-user per ora. Utenti target: security management e amministratori.
 | MQTT Client      | paho-mqtt                           | 2.x        |
 | Geometria ROI    | Shapely                             | ≥2.0       |
 | Frontend         | React 19 + Vite 7 + Tailwind 4     | —          |
+| Routing          | React Router                        | 7.x        |
 | Icone            | Lucide React                        | —          |
 | Date             | date-fns                            | 4.x        |
 | Container        | Docker + Docker Compose             | —          |
@@ -165,8 +168,9 @@ LogisticsTrack/
 │       ├── models/
 │       │   └── schemas.py      # Pydantic request/response
 │       ├── routers/
-│       │   ├── events.py       # GET eventi con filtri + paginazione
-│       │   └── cameras.py      # CRUD camere
+│       │   ├── events.py       # GET eventi con filtri + paginazione + stats/summary
+│       │   ├── cameras.py      # CRUD camere
+│       │   └── rois.py         # CRUD ROI poligonali
 │       └── services/
 │           └── mqtt_listener.py # Subscribe MQTT → PostgreSQL
 │
@@ -175,11 +179,29 @@ LogisticsTrack/
 │   ├── package.json
 │   ├── vite.config.js
 │   └── src/
-│       ├── App.jsx
+│       ├── App.jsx             # Root + BrowserRouter + 5 route
+│       ├── main.jsx
+│       ├── index.css
 │       ├── components/
-│       ├── pages/
+│       │   ├── Layout/         # AppLayout, Header (health), Sidebar (nav)
+│       │   ├── DataTable/      # Tabella generica con paginazione
+│       │   ├── FilterPanel/    # Filtri dinamici (7 tipi)
+│       │   └── StatCard.jsx    # Card statistiche dashboard
+│       ├── Pages/
+│       │   ├── Dashboard.jsx   # Stats + eventi recenti, auto-refresh 30s
+│       │   ├── Events.jsx      # Tabella completa + filtri + paginazione
+│       │   ├── Cameras.jsx     # CRUD camere (form modale + card grid)
+│       │   ├── ROIEditor.jsx   # Canvas interattivo per disegno poligoni
+│       │   └── Settings.jsx    # Placeholder (Fase futura)
+│       ├── config/
+│       │   ├── navigation.js   # Menu con filtro per ruolo
+│       │   └── eventColumns.js # Colonne tabella + definizione filtri
+│       ├── contexts/
+│       │   └── AuthContext.jsx # Ruoli admin/user (auth simulata per ora)
 │       ├── hooks/
+│       │   └── useApi.js       # Hook generico API con loading/error/data
 │       └── services/
+│           └── api.js          # Client HTTP centralizzato (/api proxy)
 │
 ├── mosquitto/                  # Config MQTT
 │   └── config/
@@ -192,17 +214,21 @@ LogisticsTrack/
 
 ## Fasi di sviluppo
 
-| Fase | Stato | Descrizione                                      |
-|------|-------|--------------------------------------------------|
-| 0    | ✅    | Riorganizzazione repo + infrastruttura Docker     |
-| 1    | ✅    | Video Analyzer MVP: YOLO + sorgente video         |
-| 2    | ✅    | ROI Engine + Event Manager + MQTT publish         |
-| 3    | ✅    | Backend API: FastAPI + PostgreSQL + MQTT listener  |
-| 4    | ⬜    | Frontend MVP: tabella eventi + ricerca            |
-| 5    | ⬜    | ROI Editor nel frontend                           |
-| 6    | ⬜    | Integrazione WMS: tag manuale + matching          |
-| 7    | ⬜    | Multi-camera support                              |
-| 8    | ⬜    | Responsive UI + ottimizzazioni                    |
+| Fase | Stato | Descrizione                                                        |
+|------|-------|--------------------------------------------------------------------|
+| 0    | ✅    | Riorganizzazione repo + infrastruttura Docker                       |
+| 1    | ✅    | Video Analyzer MVP: YOLO + sorgente video                          |
+| 2    | ✅    | ROI Engine + Event Manager + MQTT publish                          |
+| 3    | ✅    | Backend API: FastAPI + PostgreSQL + MQTT listener                   |
+| 4    | ✅    | Frontend MVP: Dashboard + tabella eventi + filtri + paginazione    |
+| 5    | ✅    | ROI Editor nel frontend (canvas poligonale + CRUD via API)         |
+| 6    | 🔶    | Integrazione WMS: schema DB pronto, manca UI tag manuale           |
+| 7    | 🔶    | Multi-camera: infrastruttura CRUD pronta, video_analyzer mono-cam  |
+| 8    | ✅    | Responsive UI: sidebar mobile, dark theme, layout adattivo         |
+| 9    | ⬜    | Event detail modal + export CSV/PDF                                |
+| 10   | ⬜    | WMS UI: pannello tag manuale + matching view                       |
+| 11   | ⬜    | Real-time updates: WebSocket/SSE per eventi live                   |
+| 12   | ⬜    | Autenticazione reale: JWT + login page + multi-utente              |
 
 ---
 
@@ -269,9 +295,17 @@ LogisticsTrack/
 
 ### ROI e MQTT
 - Le ROI si configurano in `video_analyzer/data/rois.json` (coordinate pixel, frame 1280x720)
+- Le ROI possono essere gestite anche via frontend (ROI Editor) tramite REST API `/api/rois`
 - MQTT è opzionale in dev: se Mosquitto non è attivo, il sistema continua senza pubblicare eventi
 - Per attivare Mosquitto: `docker compose up mosquitto -d`
 - Per monitorare eventi MQTT: `docker exec -it mosquitto mosquitto_sub -t "logistics/events" -v`
+
+### Frontend
+- Dev server: `cd frontend && npm install && npm run dev` (porta 5173)
+- Il proxy Vite mappa `/api` → `http://localhost:8000` e `/health` → `http://localhost:8000`
+- In Docker: hot-reload via volume mount su `frontend/src`
+- Autenticazione attualmente simulata (ruolo `admin` fisso in `AuthContext.jsx`)
+- Per usare pgadmin: `docker compose --profile tools up pgadmin -d` → http://localhost:8080
 
 ---
 
@@ -279,5 +313,10 @@ LogisticsTrack/
 
 - [ ] Definire dataset per training custom modello YOLO (Fase futura)
 - [ ] Definire protocollo WMS reale quando disponibile
-- [ ] Valutare autenticazione multi-utente (Fase futura)
+- [ ] Implementare pannello WMS nel frontend (tag manuale + vista matching)
+- [ ] Implementare event detail modal nel frontend (click su riga evento)
+- [ ] Estendere video_analyzer per gestione multi-camera
+- [ ] Implementare autenticazione reale: JWT + login page
+- [ ] Aggiungere WebSocket/SSE per aggiornamenti eventi in real-time
 - [ ] Valutare alerting real-time (notifiche push/email)
+- [ ] Export eventi in CSV/PDF dalla pagina Events
