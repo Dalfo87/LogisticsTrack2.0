@@ -1,11 +1,17 @@
 /**
  * LogisticsTrack — ROI Canvas
- * Canvas HTML5 interattivo per disegnare e visualizzare poligoni ROI.
+ * Canvas HTML5 interattivo per disegnare e modificare poligoni ROI.
  *
- * Risolve i 3 problemi strutturali:
- * 1. Coordinate corrette: getBoundingClientRect + rapporto canvas/display
- * 2. Sfondo camera: carica snapshot JPEG come immagine di sfondo
- * 3. Responsive: dimensione logica fissa 1280x720, CSS fluid con aspect-ratio
+ * Modalità:
+ *  - Visualizzazione/selezione (default)
+ *  - Disegno nuova ROI (isDrawing=true)
+ *  - Modifica vertici ROI esistente (editMode='vertices')
+ *
+ * Funzionalità:
+ *  - Snap a griglia configurabile (snapGrid prop)
+ *  - Drag vertici: mousedown → drag → mouseup → onVerticesChanged
+ *  - Doppio click su vertice (in editMode) per eliminarlo (min. 3 vertici)
+ *  - ROI disattive: bordo tratteggiato, semitrasparente
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { getCameraSnapshotUrl } from '../../services/api';
@@ -14,34 +20,37 @@ import { getCameraSnapshotUrl } from '../../services/api';
 const CANVAS_W = 1280;
 const CANVAS_H = 720;
 
-// Colori per le ROI (ciclici)
-const ROI_COLORS = [
-  'rgba(0, 255, 100, 0.6)',   // Verde
-  'rgba(100, 200, 255, 0.6)', // Azzurro
-  'rgba(255, 255, 0, 0.6)',   // Giallo
-  'rgba(255, 100, 100, 0.6)', // Rosso
-  'rgba(200, 100, 255, 0.6)', // Viola
-  'rgba(255, 180, 50, 0.6)',  // Arancione
+// Colori base [R, G, B] per palette ciclica
+const ROI_BASE_COLORS = [
+  [0, 255, 100],
+  [100, 200, 255],
+  [255, 255, 0],
+  [255, 100, 100],
+  [200, 100, 255],
+  [255, 180, 50],
 ];
 
-const ROI_FILL_COLORS = [
-  'rgba(0, 255, 100, 0.08)',
-  'rgba(100, 200, 255, 0.08)',
-  'rgba(255, 255, 0, 0.08)',
-  'rgba(255, 100, 100, 0.08)',
-  'rgba(200, 100, 255, 0.08)',
-  'rgba(255, 180, 50, 0.08)',
-];
+function getRoiRgb(roi, idx) {
+  // Usa colore personalizzato se presente (futura feature con DB migration)
+  if (roi.color && Array.isArray(roi.color) && roi.color.length >= 3) {
+    return roi.color;
+  }
+  return ROI_BASE_COLORS[idx % ROI_BASE_COLORS.length];
+}
 
 /**
  * @param {Object} props
- * @param {string} props.cameraId - ID della camera per caricare lo snapshot
- * @param {Array} props.rois - Array di ROI da visualizzare [{id, name, points, is_active}]
- * @param {number|null} props.selectedRoiId - ID della ROI evidenziata
- * @param {Function} props.onRoiCreated - Callback con array di punti [[x,y], ...]
- * @param {Function} props.onRoiSelected - Callback con roi id
- * @param {boolean} props.isDrawing - Modalità disegno attiva
- * @param {Function} props.onDrawingCancel - Callback per annullare il disegno
+ * @param {string|null} props.cameraId
+ * @param {Array}  props.rois          - [{id, name, points, is_active}]
+ * @param {number|null} props.selectedRoiId
+ * @param {Function} props.onRoiCreated  - (points) => void
+ * @param {Function} props.onRoiSelected - (roiId) => void
+ * @param {boolean} props.isDrawing
+ * @param {Function} props.onDrawingCancel
+ * @param {Object|null} props.editRoi    - ROI in edit-vertices mode (object, not updated during drag)
+ * @param {string|null} props.editMode   - 'vertices' | null
+ * @param {number} props.snapGrid        - snap step in logical px (0 = disabled)
+ * @param {Function} props.onVerticesChanged - (newPoints) => void, called on mouseup
  */
 export default function ROICanvas({
   cameraId,
@@ -51,135 +60,199 @@ export default function ROICanvas({
   onRoiSelected,
   isDrawing = false,
   onDrawingCancel,
+  editRoi = null,
+  editMode = null,
+  snapGrid = 0,
+  onVerticesChanged,
 }) {
-  const canvasRef = useRef(null);
-  const [bgImage, setBgImage] = useState(null);
+  const canvasRef       = useRef(null);
+  const [bgImage, setBgImage]           = useState(null);
   const [currentPoints, setCurrentPoints] = useState([]);
-  const [mousePos, setMousePos] = useState(null);
+  const [mousePos, setMousePos]         = useState(null);
   const [snapshotError, setSnapshotError] = useState(false);
 
+  // Vertex edit state
+  const [editPoints, setEditPoints]     = useState(null);   // [[x,y], ...]
+  const draggingRef                     = useRef(null);      // vertex index being dragged, or null
+  const editPointsRef                   = useRef(null);      // mirror for window listener
+
+  // Keep ref in sync
+  useEffect(() => { editPointsRef.current = editPoints; }, [editPoints]);
+
   // -----------------------------------------------------------------
-  // Carica snapshot camera come immagine di sfondo
+  // Carica snapshot camera
   // -----------------------------------------------------------------
   useEffect(() => {
-    if (!cameraId) {
-      setBgImage(null);
-      return;
-    }
-
+    if (!cameraId) { setBgImage(null); return; }
     setSnapshotError(false);
     const img = new Image();
     img.crossOrigin = 'anonymous';
-
-    img.onload = () => {
-      setBgImage(img);
-      setSnapshotError(false);
-    };
-
-    img.onerror = () => {
-      setBgImage(null);
-      setSnapshotError(true);
-    };
-
-    // Aggiungi timestamp per evitare cache
+    img.onload  = () => { setBgImage(img); setSnapshotError(false); };
+    img.onerror = () => { setBgImage(null); setSnapshotError(true); };
     img.src = `${getCameraSnapshotUrl(cameraId)}?t=${Date.now()}`;
   }, [cameraId]);
 
   // -----------------------------------------------------------------
-  // Converti coordinate mouse → coordinate canvas logiche
+  // Inizializza editPoints quando si entra in editMode (non su ogni update)
+  // -----------------------------------------------------------------
+  useEffect(() => {
+    if (editMode === 'vertices' && editRoi) {
+      setEditPoints(editRoi.points.map((p) => [p[0], p[1]]));
+      draggingRef.current = null;
+    } else {
+      setEditPoints(null);
+      draggingRef.current = null;
+    }
+  }, [editMode, editRoi?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -----------------------------------------------------------------
+  // Rilascio drag se il mouse va fuori dalla finestra
+  // -----------------------------------------------------------------
+  useEffect(() => {
+    const handleWindowMouseUp = () => {
+      if (draggingRef.current !== null) {
+        const pts = editPointsRef.current;
+        if (pts) onVerticesChanged?.(pts);
+        draggingRef.current = null;
+      }
+    };
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => window.removeEventListener('mouseup', handleWindowMouseUp);
+  }, [onVerticesChanged]);
+
+  // -----------------------------------------------------------------
+  // Conversione coordinate mouse → canvas logico + snap
   // -----------------------------------------------------------------
   const toCanvasCoords = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-
     const rect = canvas.getBoundingClientRect();
     const scaleX = CANVAS_W / rect.width;
     const scaleY = CANVAS_H / rect.height;
+    let x = Math.round((e.clientX - rect.left) * scaleX);
+    let y = Math.round((e.clientY - rect.top) * scaleY);
+    if (snapGrid > 0) {
+      x = Math.round(x / snapGrid) * snapGrid;
+      y = Math.round(y / snapGrid) * snapGrid;
+    }
+    return { x, y };
+  }, [snapGrid]);
 
-    return {
-      x: Math.round((e.clientX - rect.left) * scaleX),
-      y: Math.round((e.clientY - rect.top) * scaleY),
-    };
+  // -----------------------------------------------------------------
+  // Helper: distanza punto → vertice
+  // -----------------------------------------------------------------
+  const nearVertexIdx = useCallback((pt, points, threshold = 15) => {
+    if (!points) return -1;
+    for (let i = 0; i < points.length; i++) {
+      const dx = pt.x - points[i][0];
+      const dy = pt.y - points[i][1];
+      if (Math.sqrt(dx * dx + dy * dy) < threshold) return i;
+    }
+    return -1;
   }, []);
 
   // -----------------------------------------------------------------
-  // Verifica se click è vicino al primo punto (per chiudere poligono)
+  // Verifica chiusura poligono (primo punto)
   // -----------------------------------------------------------------
-  const isNearFirstPoint = useCallback(
-    (pt) => {
-      if (currentPoints.length < 3) return false;
-      const first = currentPoints[0];
-      const dx = pt.x - first[0];
-      const dy = pt.y - first[1];
-      return Math.sqrt(dx * dx + dy * dy) < 20; // 20px di tolleranza
-    },
-    [currentPoints]
-  );
+  const isNearFirstPoint = useCallback((pt) => {
+    if (currentPoints.length < 3) return false;
+    const first = currentPoints[0];
+    const dx = pt.x - first[0];
+    const dy = pt.y - first[1];
+    return Math.sqrt(dx * dx + dy * dy) < 20;
+  }, [currentPoints]);
 
   // -----------------------------------------------------------------
-  // Gestione click sul canvas
+  // Event handlers
   // -----------------------------------------------------------------
-  const handleClick = useCallback(
-    (e) => {
-      if (!isDrawing) {
-        // In modalità selezione: verifica se si è cliccato dentro una ROI
-        const pt = toCanvasCoords(e);
-        if (!pt) return;
 
-        for (const roi of rois) {
-          if (isPointInPolygon(pt, roi.points)) {
-            onRoiSelected?.(roi.id);
-            return;
-          }
-        }
-        onRoiSelected?.(null);
-        return;
-      }
+  const handleMouseDown = useCallback((e) => {
+    if (editMode !== 'vertices' || !editPoints) return;
+    const pt = toCanvasCoords(e);
+    if (!pt) return;
+    const idx = nearVertexIdx(pt, editPoints);
+    if (idx >= 0) {
+      draggingRef.current = idx;
+      e.preventDefault(); // prevent text selection
+    }
+  }, [editMode, editPoints, toCanvasCoords, nearVertexIdx]);
 
-      // Modalità disegno: aggiungi vertice
+  const handleMouseMove = useCallback((e) => {
+    const pt = toCanvasCoords(e);
+
+    // Aggiorna mouse position per overlay coordinate
+    setMousePos((isDrawing || editMode === 'vertices') ? pt : null);
+
+    // Drag vertex in edit mode
+    if (editMode === 'vertices' && draggingRef.current !== null && editPoints && pt) {
+      setEditPoints((prev) => {
+        const next = prev.map((p) => [...p]);
+        next[draggingRef.current] = [pt.x, pt.y];
+        return next;
+      });
+    }
+  }, [editMode, editPoints, isDrawing, toCanvasCoords]);
+
+  const handleMouseUp = useCallback(() => {
+    if (draggingRef.current !== null && editPoints) {
+      onVerticesChanged?.(editPoints);
+      draggingRef.current = null;
+    }
+  }, [editPoints, onVerticesChanged]);
+
+  const handleClick = useCallback((e) => {
+    if (editMode === 'vertices') return; // no click-to-add in edit mode
+
+    if (!isDrawing) {
+      // Modalità selezione
       const pt = toCanvasCoords(e);
       if (!pt) return;
-
-      // Se vicino al primo punto → chiudi poligono
-      if (isNearFirstPoint(pt)) {
-        const finalPoints = [...currentPoints];
-        setCurrentPoints([]);
-        onRoiCreated?.(finalPoints);
-        return;
+      for (const roi of rois) {
+        if (isPointInPolygon(pt, roi.points)) {
+          onRoiSelected?.(roi.id);
+          return;
+        }
       }
+      onRoiSelected?.(null);
+      return;
+    }
 
-      setCurrentPoints((prev) => [...prev, [pt.x, pt.y]]);
-    },
-    [isDrawing, toCanvasCoords, currentPoints, isNearFirstPoint, onRoiCreated, onRoiSelected, rois]
-  );
-
-  // Doppio click → chiudi poligono
-  const handleDoubleClick = useCallback(
-    (e) => {
-      if (!isDrawing || currentPoints.length < 3) return;
-      e.preventDefault();
-
+    // Modalità disegno: aggiungi vertice
+    const pt = toCanvasCoords(e);
+    if (!pt) return;
+    if (isNearFirstPoint(pt)) {
       const finalPoints = [...currentPoints];
       setCurrentPoints([]);
       onRoiCreated?.(finalPoints);
-    },
-    [isDrawing, currentPoints, onRoiCreated]
-  );
+      return;
+    }
+    setCurrentPoints((prev) => [...prev, [pt.x, pt.y]]);
+  }, [editMode, isDrawing, toCanvasCoords, currentPoints, isNearFirstPoint, onRoiCreated, onRoiSelected, rois]);
 
-  // Movimento mouse → aggiorna preview
-  const handleMouseMove = useCallback(
-    (e) => {
-      if (!isDrawing) {
-        setMousePos(null);
-        return;
-      }
+  const handleDoubleClick = useCallback((e) => {
+    if (editMode === 'vertices' && editPoints) {
+      // Elimina vertice se ≥ 4 punti
+      if (editPoints.length <= 3) return;
       const pt = toCanvasCoords(e);
-      setMousePos(pt);
-    },
-    [isDrawing, toCanvasCoords]
-  );
+      if (!pt) return;
+      const idx = nearVertexIdx(pt, editPoints);
+      if (idx >= 0) {
+        e.preventDefault();
+        const newPoints = editPoints.filter((_, i) => i !== idx);
+        setEditPoints(newPoints);
+        onVerticesChanged?.(newPoints);
+      }
+      return;
+    }
 
-  // Tasto Esc → annulla disegno
+    if (!isDrawing || currentPoints.length < 3) return;
+    e.preventDefault();
+    const finalPoints = [...currentPoints];
+    setCurrentPoints([]);
+    onRoiCreated?.(finalPoints);
+  }, [editMode, editPoints, isDrawing, currentPoints, onRoiCreated, toCanvasCoords, nearVertexIdx, onVerticesChanged]);
+
+  // Esc per annullare disegno
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isDrawing) {
@@ -191,11 +264,9 @@ export default function ROICanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDrawing, onDrawingCancel]);
 
-  // Reset punti quando si disattiva la modalità disegno
+  // Reset punti se si disattiva la modalità disegno
   useEffect(() => {
-    if (!isDrawing) {
-      setCurrentPoints([]);
-    }
+    if (!isDrawing) setCurrentPoints([]);
   }, [isDrawing]);
 
   // -----------------------------------------------------------------
@@ -206,67 +277,63 @@ export default function ROICanvas({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Pulisci
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // Sfondo: snapshot camera o grigio scuro
+    // ── Sfondo ──
     if (bgImage) {
       ctx.drawImage(bgImage, 0, 0, CANVAS_W, CANVAS_H);
     } else {
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-      // Griglia di riferimento
       ctx.strokeStyle = 'rgba(100, 100, 140, 0.15)';
       ctx.lineWidth = 1;
       for (let x = 0; x <= CANVAS_W; x += 80) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, CANVAS_H);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
       }
       for (let y = 0; y <= CANVAS_H; y += 80) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(CANVAS_W, y);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
       }
-
-      // Messaggio centrale
       ctx.fillStyle = snapshotError ? '#ef4444' : '#64748b';
       ctx.font = '18px system-ui';
       ctx.textAlign = 'center';
       ctx.fillText(
         snapshotError
           ? 'Snapshot non disponibile — camera offline'
-          : cameraId
-            ? 'Caricamento snapshot...'
-            : 'Seleziona una camera per iniziare',
-        CANVAS_W / 2,
-        CANVAS_H / 2
+          : cameraId ? 'Caricamento snapshot...' : 'Seleziona una camera per iniziare',
+        CANVAS_W / 2, CANVAS_H / 2
       );
       ctx.textAlign = 'start';
     }
 
-    // Disegna ROI esistenti
+    // ── Snap grid indicator ──
+    if (snapGrid >= 10 && (isDrawing || editMode === 'vertices')) {
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.25)';
+      for (let x = 0; x <= CANVAS_W; x += snapGrid) {
+        for (let y = 0; y <= CANVAS_H; y += snapGrid) {
+          ctx.fillRect(x - 1, y - 1, 2, 2);
+        }
+      }
+    }
+
+    // ── ROI esistenti ──
     rois.forEach((roi, i) => {
-      const colorIdx = i % ROI_COLORS.length;
+      // La ROI in edit-mode viene disegnata separatamente dopo
+      if (editMode === 'vertices' && editRoi && roi.id === editRoi.id) return;
+
+      const [r, g, b] = getRoiRgb(roi, i);
       const isSelected = roi.id === selectedRoiId;
-      const isActive = roi.is_active !== false;
+      const isActive   = roi.is_active !== false;
 
       drawPolygon(ctx, roi.points, {
-        strokeColor: isActive ? ROI_COLORS[colorIdx] : 'rgba(100, 100, 100, 0.4)',
+        strokeColor: isActive ? `rgba(${r},${g},${b},0.7)` : 'rgba(100,100,100,0.4)',
         fillColor: isSelected
-          ? 'rgba(59, 130, 246, 0.15)'
-          : isActive
-            ? ROI_FILL_COLORS[colorIdx]
-            : 'rgba(50, 50, 50, 0.05)',
+          ? 'rgba(59,130,246,0.15)'
+          : isActive ? `rgba(${r},${g},${b},0.08)` : 'rgba(50,50,50,0.05)',
         lineWidth: isSelected ? 3 : 2,
         dashed: !isActive,
       });
 
-      // Nome ROI
-      if (roi.points.length > 0) {
+      if (roi.points?.length > 0) {
         const labelPt = getPolygonCenter(roi.points);
         ctx.fillStyle = isActive ? '#e2e8f0' : '#64748b';
         ctx.font = isSelected ? 'bold 14px system-ui' : '13px system-ui';
@@ -276,9 +343,53 @@ export default function ROICanvas({
       }
     });
 
-    // Disegna poligono in corso di creazione
+    // ── ROI in modifica vertici ──
+    if (editMode === 'vertices' && editRoi && editPoints) {
+      const pts = editPoints;
+      const editRoiIdx = rois.findIndex((r) => r.id === editRoi.id);
+      const [r, g, b] = getRoiRgb(editRoi, editRoiIdx >= 0 ? editRoiIdx : 0);
+
+      // Poligono
+      drawPolygon(ctx, pts, {
+        strokeColor: `rgba(${r},${g},${b},0.95)`,
+        fillColor:   `rgba(${r},${g},${b},0.12)`,
+        lineWidth: 2.5,
+      });
+
+      // Label
+      if (pts.length > 0) {
+        const lp = getPolygonCenter(pts);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = 'bold 14px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(editRoi.name, lp[0], lp[1]);
+        ctx.textAlign = 'start';
+      }
+
+      // Vertex handles
+      pts.forEach((pt, i) => {
+        const isDragged = draggingRef.current === i;
+        ctx.beginPath();
+        ctx.arc(pt[0], pt[1], isDragged ? 11 : 7, 0, Math.PI * 2);
+        ctx.fillStyle = isDragged ? '#f59e0b' : '#3b82f6';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Indice vertice
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(i.toString(), pt[0], pt[1] + 3.5);
+        ctx.textAlign = 'start';
+      });
+
+      // Midpoint hints (click to insert — visual only for now)
+      ctx.setLineDash([]);
+    }
+
+    // ── Poligono in disegno ──
     if (isDrawing && currentPoints.length > 0) {
-      // Linee tra i punti
       ctx.beginPath();
       ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 2;
@@ -287,8 +398,6 @@ export default function ROICanvas({
       for (let i = 1; i < currentPoints.length; i++) {
         ctx.lineTo(currentPoints[i][0], currentPoints[i][1]);
       }
-
-      // Preview: linea tratteggiata al mouse
       if (mousePos) {
         ctx.setLineDash([8, 4]);
         ctx.lineTo(mousePos.x, mousePos.y);
@@ -296,7 +405,6 @@ export default function ROICanvas({
       }
       ctx.stroke();
 
-      // Vertici
       currentPoints.forEach((pt, i) => {
         ctx.beginPath();
         ctx.fillStyle = i === 0 ? '#22c55e' : '#3b82f6';
@@ -307,7 +415,6 @@ export default function ROICanvas({
         ctx.stroke();
       });
 
-      // Highlight primo punto quando vicino
       if (mousePos && isNearFirstPoint(mousePos)) {
         ctx.beginPath();
         ctx.strokeStyle = '#22c55e';
@@ -317,32 +424,51 @@ export default function ROICanvas({
       }
     }
 
-    // Istruzioni in modalità disegno
-    if (isDrawing) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    // ── Istruzioni (banner inferiore) ──
+    const showBanner = isDrawing || editMode === 'vertices';
+    if (showBanner) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(0, CANVAS_H - 36, CANVAS_W, 36);
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '13px system-ui';
-      ctx.fillText(
-        currentPoints.length === 0
-          ? '  Click per aggiungere vertici • Doppio-click o click sul primo punto per chiudere • Esc per annullare'
-          : `  ${currentPoints.length} vertici • Click per aggiungere • ${currentPoints.length >= 3 ? 'Doppio-click o click sul primo punto (verde) per chiudere' : 'Servono almeno 3 vertici'} • Esc annulla`,
-        10,
-        CANVAS_H - 12
-      );
+      if (editMode === 'vertices') {
+        ctx.fillText(
+          '  Trascina i vertici • Doppio-click su un vertice per eliminarlo (min. 3) • Salva per confermare',
+          10, CANVAS_H - 12
+        );
+      } else {
+        ctx.fillText(
+          currentPoints.length === 0
+            ? '  Click per aggiungere vertici • Doppio-click o click sul primo punto per chiudere • Esc per annullare'
+            : `  ${currentPoints.length} vertici${currentPoints.length >= 3 ? ' • Doppio-click o click sul punto verde per chiudere' : ' (min. 3)'} • Esc annulla`,
+          10, CANVAS_H - 12
+        );
+      }
     }
 
-    // Info coordinate in alto a destra
-    if (isDrawing && mousePos) {
+    // ── Overlay coordinate mouse ──
+    if ((isDrawing || editMode === 'vertices') && mousePos) {
       const coordText = `${mousePos.x}, ${mousePos.y}`;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-      const tw = ctx.measureText(coordText).width;
-      ctx.fillRect(CANVAS_W - tw - 20, 0, tw + 20, 28);
-      ctx.fillStyle = '#94a3b8';
       ctx.font = '12px monospace';
-      ctx.fillText(coordText, CANVAS_W - tw - 10, 18);
+      const tw = ctx.measureText(coordText).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(CANVAS_W - tw - 24, 0, tw + 24, 28);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(coordText, CANVAS_W - tw - 12, 18);
     }
-  }, [bgImage, rois, selectedRoiId, isDrawing, currentPoints, mousePos, snapshotError, cameraId, isNearFirstPoint]);
+
+  }, [
+    bgImage, rois, selectedRoiId, isDrawing, currentPoints, mousePos,
+    snapshotError, cameraId, isNearFirstPoint, editMode, editRoi,
+    editPoints, snapGrid,
+  ]);
+
+  // -----------------------------------------------------------------
+  // Cursor style
+  // -----------------------------------------------------------------
+  let cursor = 'default';
+  if (isDrawing)             cursor = 'crosshair';
+  else if (editMode === 'vertices') cursor = 'grab';
 
   return (
     <div className="relative w-full">
@@ -353,48 +479,33 @@ export default function ROICanvas({
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         className="w-full rounded-lg border border-slate-700 bg-slate-900"
-        style={{
-          aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
-          cursor: isDrawing ? 'crosshair' : 'default',
-        }}
+        style={{ aspectRatio: `${CANVAS_W} / ${CANVAS_H}`, cursor }}
       />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Funzioni helper
+// Helper functions
 // ---------------------------------------------------------------------------
 
-/**
- * Disegna un poligono sul canvas.
- */
 function drawPolygon(ctx, points, { strokeColor, fillColor, lineWidth = 2, dashed = false } = {}) {
   if (!points || points.length < 3) return;
-
   ctx.beginPath();
   ctx.setLineDash(dashed ? [6, 4] : []);
   ctx.moveTo(points[0][0], points[0][1]);
-  for (let i = 1; i < points.length; i++) {
-    ctx.lineTo(points[i][0], points[i][1]);
-  }
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
   ctx.closePath();
-
-  if (fillColor) {
-    ctx.fillStyle = fillColor;
-    ctx.fill();
-  }
-
+  if (fillColor) { ctx.fillStyle = fillColor; ctx.fill(); }
   ctx.strokeStyle = strokeColor || '#fff';
   ctx.lineWidth = lineWidth;
   ctx.stroke();
   ctx.setLineDash([]);
 }
 
-/**
- * Calcola il centroide di un poligono.
- */
 function getPolygonCenter(points) {
   if (!points || points.length === 0) return [0, 0];
   const sumX = points.reduce((s, p) => s + p[0], 0);
@@ -402,25 +513,16 @@ function getPolygonCenter(points) {
   return [sumX / points.length, sumY / points.length];
 }
 
-/**
- * Verifica se un punto è dentro un poligono (ray casting algorithm).
- */
 function isPointInPolygon(pt, polygon) {
   if (!polygon || polygon.length < 3) return false;
   let inside = false;
   const n = polygon.length;
-
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const xi = polygon[i][0], yi = polygon[i][1];
     const xj = polygon[j][0], yj = polygon[j][1];
-
-    if (
-      yi > pt.y !== yj > pt.y &&
-      pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi
-    ) {
+    if (yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) {
       inside = !inside;
     }
   }
-
   return inside;
 }

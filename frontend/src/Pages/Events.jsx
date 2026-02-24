@@ -1,11 +1,13 @@
 /**
  * LogisticsTrack — Events Page
- * Tabella eventi completa con filtri dinamici e paginazione server-side.
+ * Tabella eventi completa con filtri dinamici, paginazione server-side
+ * e lightbox per visualizzazione crop ingranditi.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
 import DataTable from '../components/DataTable/DataTable';
 import FilterPanel from '../components/FilterPanel/FilterPanel';
+import ImageLightbox from '../components/ImageLightbox/ImageLightbox';
 import { fetchEvents } from '../services/api';
 import { eventColumns, eventFilters } from '../config/eventColumns';
 
@@ -19,6 +21,7 @@ export default function Events() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(emptyFilters);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -44,6 +47,21 @@ export default function Events() {
   useEffect(() => {
     loadEvents();
   }, [loadEvents]);
+
+  // Gestione click sulle thumbnail crop (delegate event listener)
+  // Le immagini crop hanno data-lightbox="url" settato da eventColumns.js
+  useEffect(() => {
+    const handleClick = (e) => {
+      const img = e.target.closest('[data-lightbox]');
+      if (img) {
+        e.preventDefault();
+        setLightboxSrc(img.getAttribute('data-lightbox'));
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
 
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
@@ -95,6 +113,14 @@ export default function Events() {
         pagination={{ page, pageSize: PAGE_SIZE, total }}
         onPageChange={setPage}
       />
+
+      {/* Lightbox per ingrandimento crop */}
+      {lightboxSrc && (
+        <ImageLightbox
+          src={lightboxSrc}
+          onClose={() => setLightboxSrc(null)}
+        />
+      )}
     </div>
   );
 }

@@ -134,8 +134,11 @@ async def get_camera_snapshot(
     # Tenta di catturare un frame RTSP
     if camera.rtsp_url:
         try:
-            cap = cv2.VideoCapture(camera.rtsp_url)
-            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            # Timeout DEVE essere impostato PRIMA di aprire lo stream
+            cap = cv2.VideoCapture()
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)
+            cap.open(camera.rtsp_url)
             if cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:

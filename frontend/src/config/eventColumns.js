@@ -85,6 +85,19 @@ export const eventColumns = [
   },
   {
     key: 'raw_data',
+    label: 'Target',
+    sortable: false,
+    render: (value) => {
+      if (!value || !value.label) return '—';
+      const label = value.label;
+      return `<span class="px-2 py-0.5 rounded text-xs font-medium bg-purple-500/20 text-purple-400">${label}</span>`;
+    },
+    isHtml: true,
+    uniqueKey: 'target_label',
+    minWidth: '100px',
+  },
+  {
+    key: 'raw_data',
     label: 'Conf.',
     sortable: false,
     render: (value) => {
@@ -108,6 +121,20 @@ export const eventColumns = [
     minWidth: '70px',
     // Chiave unica per evitare conflitto con l'altra colonna raw_data
     uniqueKey: 'dwell',
+  },
+  {
+    key: 'id',
+    label: 'Crop',
+    sortable: false,
+    render: (value, row) => {
+      const hasCrop = row?.raw_data?.crop_filename;
+      if (!hasCrop) return '<span class="text-slate-600 text-xs">—</span>';
+      const url = `/api/events/${value}/crop`;
+      return `<img src="${url}" alt="crop" data-lightbox="${url}" class="h-10 w-14 object-cover rounded cursor-pointer border border-slate-700 hover:border-blue-500 transition-colors" loading="lazy" onerror="this.style.display='none'" />`;
+    },
+    isHtml: true,
+    uniqueKey: 'crop_image',
+    minWidth: '80px',
   },
   {
     key: 'validated',

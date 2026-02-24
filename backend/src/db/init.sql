@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS rois (
 CREATE TABLE IF NOT EXISTS events (
     id              SERIAL PRIMARY KEY,
     timestamp       TIMESTAMPTZ NOT NULL,
-    camera_id       VARCHAR(50) NOT NULL REFERENCES cameras(id),
+    camera_id       VARCHAR(50) NOT NULL,  -- Nessuna FK: eventi sopravvivono alla cancellazione camera
     aisle_id        VARCHAR(50),
     event_type      VARCHAR(50) NOT NULL DEFAULT 'forklift_pallet',
 

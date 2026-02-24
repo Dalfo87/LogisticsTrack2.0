@@ -178,3 +178,67 @@ export async function exportROIs(cameraId) {
     method: 'POST',
   });
 }
+
+// ---------------------------------------------------------------------------
+// Services (Docker container management)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lista lo stato di tutti i container Docker tracciati.
+ */
+export async function fetchServices() {
+  return request('/services');
+}
+
+/**
+ * Riavvia un container Docker specifico.
+ * @param {string} serviceName - Nome logico del servizio (es. "video_analyzer")
+ */
+export async function restartService(serviceName) {
+  return request(`/services/${serviceName}/restart`, {
+    method: 'POST',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stream server (video_analyzer porta 8765, proxied via /video-stream)
+// ---------------------------------------------------------------------------
+
+const STREAM_BASE = '/video-stream';
+
+/**
+ * Recupera la configurazione runtime YOLO dallo stream server.
+ */
+export async function fetchStreamConfig() {
+  const res = await fetch(`${STREAM_BASE}/config`, { signal: AbortSignal.timeout(3000) });
+  if (!res.ok) throw new Error(`Errore HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Aggiorna la configurazione runtime YOLO (live, senza restart).
+ * @param {Object} config - { confidence?, iou?, target_classes? }
+ */
+export async function updateStreamConfig(config) {
+  const res = await fetch(`${STREAM_BASE}/config`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`Errore HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Richiede il restart del loop di analisi video.
+ * Usare insieme a restartService('video_analyzer') per restart completo del container.
+ */
+export async function requestStreamRestart() {
+  const res = await fetch(`${STREAM_BASE}/restart`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`Errore HTTP ${res.status}`);
+  return res.json();
+}

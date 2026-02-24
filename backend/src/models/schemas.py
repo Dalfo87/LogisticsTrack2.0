@@ -126,3 +126,5 @@ class MQTTEventPayload(BaseModel):
     reference_point: str
     dwell_seconds: float = 0.0
     parent_roi_id: Optional[str] = None
+    label: str = ""
+    crop_filename: str = ""

@@ -238,4 +238,6 @@ class EventManager:
             "reference_point": str(event.reference_point_used),
             "dwell_seconds": float(round(event.dwell_seconds, 2)),
             "parent_roi_id": str(event.parent_roi_id) if event.parent_roi_id else None,
+            "label": str(event.label) if event.label else "",
+            "crop_filename": str(event.crop_filename) if event.crop_filename else "",
         }

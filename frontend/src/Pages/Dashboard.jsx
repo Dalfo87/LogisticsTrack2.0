@@ -1,57 +1,213 @@
 /**
  * LogisticsTrack — Dashboard Page
  * Panoramica sistema: statistiche, stato, ultimi eventi.
+ *
+ * Aggiornamento dati:
+ *  - SSE EventSource su /api/events/stream → nuovi eventi in cima alla lista (real-time)
+ *  - Polling ogni 5s per statistiche/contatori
+ *  - Pulsante refresh manuale in alto a destra
+ *  - Badge "● Live" verde / "○ Offline" rosso secondo stato SSE
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   CalendarClock,
   CheckCircle2,
-  AlertCircle,
   LogIn,
   LogOut,
   Timer,
+  RefreshCw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import DataTable from '../components/DataTable/DataTable';
 import { fetchEventsSummary, fetchEvents } from '../services/api';
 import { eventColumns } from '../config/eventColumns';
 
-export default function Dashboard() {
-  const [summary, setSummary] = useState(null);
-  const [recentEvents, setRecentEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
+const MAX_LIVE_EVENTS = 50; // massimo eventi in lista live
+const SSE_RECONNECT_DELAY = 3000; // ms prima di riconnettersi SSE
 
-  const loadData = async () => {
+export default function Dashboard() {
+  const [summary, setSummary]         = useState(null);
+  const [recentEvents, setRecentEvents] = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [sseStatus, setSseStatus]     = useState('connecting'); // 'connecting' | 'live' | 'offline'
+
+  const sseRef            = useRef(null);
+  const reconnectTimer    = useRef(null);
+  const pollingInterval   = useRef(null);
+  const mountedRef        = useRef(true);
+
+  // ── Carica statistiche e lista eventi (polling) ──
+  const loadStats = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setRefreshing(true);
+    try {
+      const summaryData = await fetchEventsSummary();
+      if (mountedRef.current) setSummary(summaryData);
+    } catch (err) {
+      console.error('Errore caricamento stats:', err);
+    } finally {
+      if (showSpinner && mountedRef.current) setRefreshing(false);
+    }
+  }, []);
+
+  const loadInitialEvents = useCallback(async () => {
     setLoading(true);
+    try {
+      const eventsData = await fetchEvents({ page: 1, page_size: MAX_LIVE_EVENTS });
+      if (mountedRef.current) setRecentEvents(eventsData?.events || []);
+    } catch (err) {
+      console.error('Errore caricamento eventi:', err);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  const handleManualRefresh = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [summaryData, eventsData] = await Promise.all([
         fetchEventsSummary(),
-        fetchEvents({ page: 1, page_size: 10 }),
+        fetchEvents({ page: 1, page_size: MAX_LIVE_EVENTS }),
       ]);
-      setSummary(summaryData);
-      setRecentEvents(eventsData?.events || []);
+      if (mountedRef.current) {
+        setSummary(summaryData);
+        setRecentEvents(eventsData?.events || []);
+      }
     } catch (err) {
-      console.error('Errore caricamento dashboard:', err);
+      console.error('Errore refresh manuale:', err);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    loadData();
-    // Auto-refresh ogni 30 secondi
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
   }, []);
+
+  // ── SSE EventSource ──
+  const connectSSE = useCallback(() => {
+    if (!mountedRef.current) return;
+
+    // Chiudi eventuale connessione precedente
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+
+    setSseStatus('connecting');
+
+    const es = new EventSource('/api/events/stream');
+    sseRef.current = es;
+
+    es.onopen = () => {
+      if (mountedRef.current) setSseStatus('live');
+    };
+
+    es.onmessage = (e) => {
+      if (!mountedRef.current) return;
+      try {
+        const event = JSON.parse(e.data);
+        // Aggiunge il nuovo evento in cima alla lista (max MAX_LIVE_EVENTS)
+        setRecentEvents((prev) => {
+          const updated = [event, ...prev];
+          return updated.slice(0, MAX_LIVE_EVENTS);
+        });
+        // Aggiorna anche il contatore totale
+        setSummary((prev) =>
+          prev
+            ? {
+                ...prev,
+                total_events: (prev.total_events ?? 0) + 1,
+                by_type: {
+                  ...prev.by_type,
+                  [event.event_type]: ((prev.by_type?.[event.event_type] ?? 0) + 1),
+                },
+              }
+            : prev
+        );
+      } catch {
+        // payload non valido — ignora
+      }
+    };
+
+    es.onerror = () => {
+      if (!mountedRef.current) return;
+      setSseStatus('offline');
+      es.close();
+      sseRef.current = null;
+      // Tenta riconnessione automatica
+      reconnectTimer.current = setTimeout(() => {
+        if (mountedRef.current) connectSSE();
+      }, SSE_RECONNECT_DELAY);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Lifecycle ──
+  useEffect(() => {
+    mountedRef.current = true;
+
+    // Caricamento iniziale
+    loadInitialEvents();
+    loadStats();
+
+    // Connetti SSE
+    connectSSE();
+
+    // Polling 5s per statistiche (SSE gestisce gli eventi live)
+    pollingInterval.current = setInterval(() => loadStats(), 5000);
+
+    return () => {
+      mountedRef.current = false;
+      clearInterval(pollingInterval.current);
+      clearTimeout(reconnectTimer.current);
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+    };
+  }, [connectSSE, loadInitialEvents, loadStats]);
 
   const byType = summary?.by_type || {};
 
   return (
     <div className="space-y-6">
-      {/* Titolo */}
-      <div>
-        <h1 className="text-xl font-bold text-white">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-1">Panoramica sistema LogisticsTrack</p>
+      {/* Titolo + badge SSE + refresh */}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-white">Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-1">Panoramica sistema LogisticsTrack</p>
+        </div>
+
+        <div className="flex items-center gap-2 mt-1">
+          {/* Badge SSE */}
+          <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
+            sseStatus === 'live'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : sseStatus === 'connecting'
+              ? 'bg-slate-700/50 border-slate-600 text-slate-400'
+              : 'bg-red-500/10 border-red-500/30 text-red-400'
+          }`}>
+            {sseStatus === 'live' && (
+              <><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</>
+            )}
+            {sseStatus === 'connecting' && (
+              <><span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />Connessione…</>
+            )}
+            {sseStatus === 'offline' && (
+              <><WifiOff size={10} />Offline</>
+            )}
+          </span>
+
+          {/* Pulsante refresh manuale */}
+          <button
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            title="Aggiorna dati"
+            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700
+                       text-slate-400 hover:text-white transition-colors
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       {/* Stat Cards */}
@@ -90,9 +246,16 @@ export default function Dashboard() {
 
       {/* Ultimi eventi */}
       <div>
-        <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
-          Ultimi eventi
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+            Ultimi eventi
+          </h2>
+          {sseStatus === 'live' && (
+            <span className="text-xs text-slate-600">
+              Aggiornamento real-time attivo
+            </span>
+          )}
+        </div>
         <DataTable
           columns={eventColumns}
           data={recentEvents}

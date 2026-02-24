@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.database import init_db, close_db
-from routers import events, cameras, rois
+from routers import events, cameras, rois, services
 from services.mqtt_listener import MQTTListener
 
 logging.basicConfig(
@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
 
     # MQTT Listener
     await mqtt_listener.start()
+
+    # Esponi il listener in app.state per l'endpoint SSE
+    app.state.mqtt_listener = mqtt_listener
 
     logger.info("Backend avviato.")
     logger.info("=" * 60)
@@ -77,6 +80,7 @@ app.add_middleware(
 app.include_router(events.router)
 app.include_router(cameras.router)
 app.include_router(rois.router)
+app.include_router(services.router)
 
 
 @app.get("/health")

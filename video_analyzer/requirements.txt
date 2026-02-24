@@ -7,3 +7,6 @@ paho-mqtt>=2.1.0
 numpy>=1.26.0
 shapely>=2.0.0
 python-dotenv>=1.0.0
+# Stream server MJPEG
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0

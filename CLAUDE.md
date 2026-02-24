@@ -47,7 +47,7 @@ Camera RTSP / File MP4
 
 | Servizio         | Porta | Descrizione                                      |
 |------------------|-------|--------------------------------------------------|
-| video_analyzer   | —     | Pipeline YOLO, no porta esposta                  |
+| video_analyzer   | 8765  | Pipeline YOLO + stream server MJPEG              |
 | backend          | 8000  | FastAPI REST API                                 |
 | frontend         | 5173  | React dev server (dev) / nginx (prod)            |
 | mosquitto        | 1883  | MQTT broker                                      |
@@ -139,26 +139,30 @@ LogisticsTrack/
 ├── CLAUDE.md                   # Questo file
 ├── README.md                   # Documentazione pubblica
 ├── docker-compose.yml          # Orchestrazione dev
-├── .env.example                # Template variabili ambiente
+├── .env                        # Variabili ambiente (non versionato)
 ├── .gitignore
 │
 ├── video_analyzer/             # Servizio: Analisi video
 │   ├── Dockerfile
 │   ├── requirements.txt
+│   ├── models/                 # Modelli YOLO .pt (selezionabili via UI Settings)
+│   │   └── best.pt
 │   ├── data/
-│   │   └── rois.json           # Definizione ROI poligonali (JSON)
+│   │   ├── rois.json           # Definizione ROI poligonali (JSON)
+│   │   └── videos/             # Video MP4 per test locale
 │   └── src/
-│       ├── main.py             # Entry point pipeline completa
+│       ├── main.py             # Entry point pipeline + outer restart loop
 │       ├── config.py           # Configurazione centralizzata (.env)
 │       ├── video_source.py     # Astrazione sorgente RTSP/MP4
-│       ├── detector.py         # YOLO detection + tracking
+│       ├── detector.py         # YOLO detection + tracking (model_path_override)
 │       ├── reference_point.py  # Strategia punto di riferimento bbox
 │       ├── roi_engine.py       # Poligoni ROI + stato enter/exit/dwell
-│       └── event_manager.py    # Publisher MQTT eventi
+│       ├── event_manager.py    # Publisher MQTT eventi
+│       └── stream_server.py    # MJPEG stream server (porta 8765) + API runtime YOLO
 │
 ├── backend/                    # Servizio: API REST
 │   ├── Dockerfile
-│   ├── requirements.txt
+│   ├── requirements.txt        # include docker>=7.0.0 per services.py
 │   └── src/
 │       ├── main.py             # FastAPI + lifespan (DB + MQTT)
 │       ├── db/
@@ -168,33 +172,37 @@ LogisticsTrack/
 │       ├── models/
 │       │   └── schemas.py      # Pydantic request/response
 │       ├── routers/
-│       │   ├── events.py       # GET eventi con filtri + paginazione + stats/summary
+│       │   ├── events.py       # GET eventi + stats/summary + SSE stream (/api/events/stream)
 │       │   ├── cameras.py      # CRUD camere
-│       │   └── rois.py         # CRUD ROI poligonali
+│       │   ├── rois.py         # CRUD ROI poligonali
+│       │   └── services.py     # Stato e restart container Docker (/api/services)
 │       └── services/
-│           └── mqtt_listener.py # Subscribe MQTT → PostgreSQL
+│           └── mqtt_listener.py # Subscribe MQTT → PostgreSQL + SSE pub/sub (subscribe_sse/unsubscribe_sse)
 │
 ├── frontend/                   # Servizio: Dashboard React
 │   ├── Dockerfile
 │   ├── package.json
-│   ├── vite.config.js
+│   ├── vite.config.js          # Proxy: /api→8000, /health→8000, /video-stream→8765
 │   └── src/
-│       ├── App.jsx             # Root + BrowserRouter + 5 route
+│       ├── App.jsx             # Root + BrowserRouter + 6 route
 │       ├── main.jsx
 │       ├── index.css
 │       ├── components/
 │       │   ├── Layout/         # AppLayout, Header (health), Sidebar (nav)
 │       │   ├── DataTable/      # Tabella generica con paginazione
 │       │   ├── FilterPanel/    # Filtri dinamici (7 tipi)
+│       │   ├── ImageLightbox/  # Modale lightbox per immagini crop eventi
+│       │   ├── ROICanvas/      # Canvas interattivo poligoni ROI (usato da ROIEditor)
 │       │   └── StatCard.jsx    # Card statistiche dashboard
 │       ├── Pages/
-│       │   ├── Dashboard.jsx   # Stats + eventi recenti, auto-refresh 30s
+│       │   ├── Dashboard.jsx   # Stats + eventi recenti, SSE live + polling 5s + refresh manuale
 │       │   ├── Events.jsx      # Tabella completa + filtri + paginazione
 │       │   ├── Cameras.jsx     # CRUD camere (form modale + card grid)
-│       │   ├── ROIEditor.jsx   # Canvas interattivo per disegno poligoni
-│       │   └── Settings.jsx    # Placeholder (Fase futura)
+│       │   ├── ROIEditor.jsx   # Canvas interattivo: disegno + modifica vertici + toggle active + snap
+│       │   ├── VideoAnalyzer.jsx # Stream MJPEG live con toggle overlay FPS/MQTT (/live)
+│       │   └── Settings.jsx    # Modello YOLO + parametri rilevamento + bbox visual props
 │       ├── config/
-│       │   ├── navigation.js   # Menu con filtro per ruolo
+│       │   ├── navigation.js   # Menu: Dashboard, Video Live, Eventi, Camere, ROI, Impostazioni
 │       │   └── eventColumns.js # Colonne tabella + definizione filtri
 │       ├── contexts/
 │       │   └── AuthContext.jsx # Ruoli admin/user (auth simulata per ora)
@@ -224,11 +232,17 @@ LogisticsTrack/
 | 5    | ✅    | ROI Editor nel frontend (canvas poligonale + CRUD via API)         |
 | 6    | 🔶    | Integrazione WMS: schema DB pronto, manca UI tag manuale           |
 | 7    | 🔶    | Multi-camera: infrastruttura CRUD pronta, video_analyzer mono-cam  |
-| 8    | ✅    | Responsive UI: sidebar mobile, dark theme, layout adattivo         |
+| 8    | ✅    | Responsive UI + Video Live (MJPEG stream) + Services monitor       |
+| 8.1  | ✅    | stream_server.py: MJPEG + API runtime (confidence, IoU, model)    |
+| 8.2  | ✅    | Settings: selezione modello YOLO da models/ + restart loop         |
+| 8.3  | ✅    | Settings: parametri YOLO editabili + bbox visual props + classi   |
+| 8.4  | ✅    | ROI Editor: modifica vertici drag + toggle active + snap a griglia |
+| 8.5  | ✅    | VideoAnalyzer: toggle overlay FPS/MQTT                             |
+| 8.6  | ✅    | Dashboard: SSE real-time + polling 5s + refresh manuale            |
+| 8.7  | ✅    | Backend SSE: /api/events/stream + mqtt_listener pub/sub             |
 | 9    | ⬜    | Event detail modal + export CSV/PDF                                |
 | 10   | ⬜    | WMS UI: pannello tag manuale + matching view                       |
-| 11   | ⬜    | Real-time updates: WebSocket/SSE per eventi live                   |
-| 12   | ⬜    | Autenticazione reale: JWT + login page + multi-utente              |
+| 11   | ⬜    | Autenticazione reale: JWT + login page + multi-utente              |
 
 ---
 
@@ -302,10 +316,56 @@ LogisticsTrack/
 
 ### Frontend
 - Dev server: `cd frontend && npm install && npm run dev` (porta 5173)
-- Il proxy Vite mappa `/api` → `http://localhost:8000` e `/health` → `http://localhost:8000`
+- Proxy Vite: `/api` → `http://localhost:8000`, `/health` → `http://localhost:8000`, `/video-stream` → `http://localhost:8765`
 - In Docker: hot-reload via volume mount su `frontend/src`
 - Autenticazione attualmente simulata (ruolo `admin` fisso in `AuthContext.jsx`)
 - Per usare pgadmin: `docker compose --profile tools up pgadmin -d` → http://localhost:8080
+
+### Stream Server MJPEG (video_analyzer)
+- Abilitare con `VA_STREAM_ENABLED=true` (default: true) e `VA_STREAM_PORT=8765` (default: 8765)
+- Endpoint: `GET /stream` (MJPEG), `GET /config`, `PATCH /config`, `POST /restart`, `GET /health`, `GET /models`, `GET /classes`
+- Il frontend accede via proxy Vite `/video-stream/*` → `http://localhost:8765/*`
+- Pagina "Video Live" (`/live`): visualizza stream in tempo reale con overlay YOLO + toggle overlay
+- Il server sopravvive ai restart del loop principale (thread daemon idempotente)
+
+### Parametri runtime YOLO (stream server)
+- `confidence` (float 0.1-1.0), `iou` (float 0.1-1.0), `target_classes` (list[int] | null)
+- `model_path` (str | null) — richiede restart loop
+- `bbox_thickness` (int 1-8), `font_scale` (float 0.3-1.5), `font_thickness` (int 1-4)
+- `show_label` (bool), `show_dot` (bool), `jpeg_quality` (int 20-95), `show_overlay` (bool)
+- Tutti aggiornabili via `PATCH /video-stream/config` dal frontend Settings
+- `show_overlay` controlla anche overlay FPS/MQTT nella pagina Video Live (toggle button)
+
+### ROI Editor — modifica ROI esistenti
+- Clic sulla ROI nella lista → apre pannello edit con: nome, aisle_id, toggle attiva
+- Pulsante "Modifica vertici" → attiva edit-mode canvas: drag dei vertex handles
+- Mouseup → `onVerticesChanged(newPoints)` → "Salva vertici" → PUT /api/rois/{id}
+- Toggle attivo inline (clic sull'icona CheckCircle2/XCircle) → PUT senza aprire il pannello
+- Snap a griglia 20px togglable dalla toolbar (bottone "Snap ON/OFF")
+- ROI disattive: bordo tratteggiato, semitrasparente (già funzionante nella versione precedente)
+- Nota: campo `color` non supportato dal DB (ROI table non ha colonna color)
+
+### Backend SSE (Server-Sent Events)
+- Endpoint: `GET /api/events/stream` (text/event-stream)
+- Ogni nuovo evento MQTT ricevuto e persistito viene broadcastato a tutti i client connessi
+- Pattern: `MQTTListener.subscribe_sse()` → `asyncio.Queue`, `unsubscribe_sse()` alla disconnessione
+- Keepalive ping ogni 30s con `: keepalive\n\n` per prevenire timeout proxy
+- `app.state.mqtt_listener` espone il listener all'endpoint SSE via `request.app.state`
+- Dashboard: `EventSource('/api/events/stream')` + polling 5s per stats + refresh manuale
+
+### Selezione modello YOLO
+- Posizionare i file `.pt` in `video_analyzer/models/`
+- `GET /video-stream/models` lista i modelli disponibili con nome e dimensione
+- `PATCH /video-stream/config` con `{model_path: "models/nome.pt"}` imposta il modello
+- `POST /video-stream/restart` riavvia il loop di analisi con il nuovo modello (~3-5s downtime)
+- Il loop principale (`main.py`) legge il `model_path` da `stream_server.get_runtime_config()` ad ogni avvio
+- Configurabile anche da `Settings` nel frontend (pagina Impostazioni)
+
+### Backend services.py
+- Router `/api/services`: stato container Docker (`GET`) e restart (`POST /{name}/restart`)
+- Richiede che `/var/run/docker.sock` sia montato nel container backend
+- Dipendenza: `docker>=7.0.0` in `backend/requirements.txt`
+- Postgres è in `RESTART_BLOCKED` (restart non consentito via API)
 
 ---
 
@@ -317,6 +377,7 @@ LogisticsTrack/
 - [ ] Implementare event detail modal nel frontend (click su riga evento)
 - [ ] Estendere video_analyzer per gestione multi-camera
 - [ ] Implementare autenticazione reale: JWT + login page
-- [ ] Aggiungere WebSocket/SSE per aggiornamenti eventi in real-time
 - [ ] Valutare alerting real-time (notifiche push/email)
 - [ ] Export eventi in CSV/PDF dalla pagina Events
+- [ ] Aggiungere campo `color` [R,G,B] alla tabella ROI (migration) + sync con frontend
+- [ ] Aggiungere campo `dwell_threshold_sec` alla tabella ROI (migration) + UI Settings ROI

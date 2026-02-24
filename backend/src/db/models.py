@@ -26,7 +26,6 @@ class Camera(Base):
 
     # Relazioni
     rois: Mapped[list["ROI"]] = relationship(back_populates="camera", cascade="all, delete-orphan")
-    events: Mapped[list["Event"]] = relationship(back_populates="camera")
 
 
 class ROI(Base):
@@ -51,7 +50,7 @@ class Event(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    camera_id: Mapped[str] = mapped_column(String(50), ForeignKey("cameras.id"), nullable=False)
+    camera_id: Mapped[str] = mapped_column(String(50), nullable=False)  # Nessuna FK: gli eventi sopravvivono alla cancellazione della camera
     aisle_id: Mapped[str | None] = mapped_column(String(50))
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, default="forklift_pallet")
 
@@ -70,8 +69,6 @@ class Event(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    # Relazioni
-    camera: Mapped["Camera"] = relationship(back_populates="events")
 
 
 class WMSTag(Base):

@@ -22,10 +22,13 @@ dist-ssr/
 video_analyzer/*/*.pt
 video_analyzer/*/*.onnx
 video_analyzer/*/*.engine
+video_analyzer/*/*.tflite
+video_analyzer/*.pt   
 
 # --- Video di test (pesanti) ---
 video_analyzer/data/videos/*.mp4
 video_analyzer/data/videos/*.avi
+video_analyzer/data/crops
 
 # --- Docker volumi locali ---
 postgres_data/

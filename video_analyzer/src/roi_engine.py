@@ -70,6 +70,7 @@ class TrackState:
     last_seen_at: Optional[float] = None  # ultimo frame in cui è stato visto nella ROI
     confidence: float = 0.0               # ultima confidence rilevata
     bbox: tuple[int, int, int, int] = (0, 0, 0, 0)
+    class_name: str = ""                  # classe YOLO rilevata (es. "person", "forklift")
 
     @property
     def dwell_seconds(self) -> float:
@@ -95,6 +96,8 @@ class ROIEvent:
     timestamp: float                   # time.time() (epoch)
     dwell_seconds: float = 0.0        # solo per roi_exit e dwell_time
     parent_roi_id: Optional[str] = None
+    label: str = ""                    # classe YOLO rilevata (es. "person", "forklift")
+    crop_filename: str = ""            # nome file crop JPEG (compilato da main.py)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +280,7 @@ class ROIEngine:
                     state.last_seen_at = now
                     state.confidence = det.confidence
                     state.bbox = det.bbox
+                    state.class_name = det.class_name
 
                     event = ROIEvent(
                         event_type="roi_enter",
@@ -290,6 +294,7 @@ class ROIEngine:
                         reference_point_used=roi.reference_point.value,
                         timestamp=now_epoch,
                         parent_roi_id=roi.parent_id,
+                        label=det.class_name,
                     )
                     events.append(event)
                     logger.info(
@@ -302,6 +307,7 @@ class ROIEngine:
                     state.last_seen_at = now
                     state.confidence = det.confidence
                     state.bbox = det.bbox
+                    state.class_name = det.class_name
 
                     # Check soglia dwell
                     if roi.id in self._dwell_thresholds:
@@ -323,6 +329,7 @@ class ROIEngine:
                                 timestamp=now_epoch,
                                 dwell_seconds=dwell,
                                 parent_roi_id=roi.parent_id,
+                                label=det.class_name,
                             )
                             events.append(event)
                             logger.info(
@@ -348,6 +355,7 @@ class ROIEngine:
                         timestamp=now_epoch,
                         dwell_seconds=dwell,
                         parent_roi_id=roi.parent_id,
+                        label=det.class_name,
                     )
                     events.append(event)
                     logger.info(
@@ -417,6 +425,7 @@ class ROIEngine:
                 timestamp=now_epoch,
                 dwell_seconds=dwell,
                 parent_roi_id=roi.parent_id,
+                label=state.class_name,
             )
             events.append(event)
             logger.info(

@@ -4,6 +4,7 @@
  */
 import {
   LayoutDashboard,
+  Video,
   CalendarClock,
   Camera,
   Layers,
@@ -22,6 +23,12 @@ export const navigationItems = [
     path: '/',
     label: 'Dashboard',
     icon: LayoutDashboard,
+    roles: ['admin', 'user'],
+  },
+  {
+    path: '/live',
+    label: 'Video Live',
+    icon: Video,
     roles: ['admin', 'user'],
   },
   {

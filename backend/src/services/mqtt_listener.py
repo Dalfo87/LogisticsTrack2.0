@@ -44,6 +44,8 @@ class MQTTListener:
         self._persist_task: Optional[asyncio.Task] = None
         self._running = False
         self._events_persisted = 0
+        # SSE pub/sub: lista di code per i subscriber attivi
+        self._sse_subscribers: list[asyncio.Queue] = []
 
     # -------------------------------------------------------------------
     # Lifecycle
@@ -92,6 +94,28 @@ class MQTTListener:
                 pass
 
         logger.info(f"MQTT Listener fermato. Totale eventi persistiti: {self._events_persisted}")
+
+    # -------------------------------------------------------------------
+    # SSE pub/sub
+    # -------------------------------------------------------------------
+
+    def subscribe_sse(self) -> asyncio.Queue:
+        """
+        Registra un nuovo subscriber SSE.
+        Restituisce una coda da cui il subscriber leggerà gli eventi in arrivo.
+        """
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._sse_subscribers.append(q)
+        logger.debug(f"SSE subscriber aggiunto (totale: {len(self._sse_subscribers)})")
+        return q
+
+    def unsubscribe_sse(self, q: asyncio.Queue) -> None:
+        """Rimuove un subscriber SSE (chiamato alla disconnessione del client)."""
+        try:
+            self._sse_subscribers.remove(q)
+            logger.debug(f"SSE subscriber rimosso (totale: {len(self._sse_subscribers)})")
+        except ValueError:
+            pass  # già rimosso
 
     # -------------------------------------------------------------------
     # Callbacks MQTT (eseguiti nel thread paho)
@@ -178,6 +202,8 @@ class MQTTListener:
                 "reference_point": payload.get("reference_point"),
                 "dwell_seconds": dwell_seconds,
                 "parent_roi_id": payload.get("parent_roi_id"),
+                "label": payload.get("label", ""),
+                "crop_filename": payload.get("crop_filename", ""),
             }
 
             # Determina entered_at/exited_at in base al tipo evento
@@ -209,6 +235,27 @@ class MQTTListener:
                 f"aisle={aisle_id} | dwell={dwell_seconds:.1f}s "
                 f"[totale: {self._events_persisted}]"
             )
+
+            # Broadcast SSE: invia il payload a tutti i subscriber attivi
+            if self._sse_subscribers:
+                # Costruisci il dict da trasmettere via SSE
+                sse_data = {
+                    "event_type": event_type,
+                    "camera_id": camera_id,
+                    "aisle_id": aisle_id,
+                    "track_id": track_id,
+                    "dwell_seconds": dwell_seconds,
+                    "timestamp": timestamp_str,
+                    "roi_name": payload.get("roi_name"),
+                    "confidence": payload.get("confidence"),
+                    "label": payload.get("label", ""),
+                    "crop_filename": payload.get("crop_filename", ""),
+                }
+                for q in list(self._sse_subscribers):  # copia lista per sicurezza
+                    try:
+                        q.put_nowait(sse_data)
+                    except asyncio.QueueFull:
+                        logger.debug("SSE subscriber queue piena, evento scartato")
 
         except Exception as e:
             logger.error(f"Errore persistenza evento: {e}", exc_info=True)

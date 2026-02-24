@@ -51,6 +51,16 @@ class VideoAnalyzerConfig:
     roi_file: str = os.getenv("ROI_FILE", "data/rois.json")
     camera_id: str = os.getenv("CAMERA_ID", "CAM_DEV_01")
 
+    # Crop immagini eventi (salvataggio bbox target rilevati)
+    crops_dir: str = os.getenv("CROPS_DIR", "data/crops")
+
+    # Stream server MJPEG
+    stream_port: int = int(os.getenv("VA_STREAM_PORT", "8765"))
+    stream_enabled: bool = os.getenv("VA_STREAM_ENABLED", "true").lower() == "true"
+
+    # IoU threshold per NMS (modificabile runtime via stream server API)
+    yolo_iou: float = float(os.getenv("YOLO_IOU", "0.45"))
+
     def __post_init__(self) -> None:
         """Parsing target_classes da env se presente."""
         classes_env = os.getenv("TARGET_CLASSES", "")

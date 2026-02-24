@@ -20,6 +20,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/video-stream': {
+        target: 'http://localhost:8765',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/video-stream/, ''),
+      },
     },
   },
 })
