@@ -1,0 +1,27 @@
+{
+    "modules": [
+        {
+            "type": "logistics",
+            "config": {
+                "roi_file": "data/rois.json"
+            },
+            "enabled": true
+        },
+        {
+            "type": "no_entry_filter",
+            "config": {
+                "roi_file": "data/rois.json",
+                "pose_model_path": null,
+                "authorized_vests": [
+                    "orange",
+                    "yellow",
+                    "green"
+                ],
+                "smoothing_window": 10,
+                "classifier_model_path": null,
+                "min_dwell_before_alert": 2
+            },
+            "enabled": false
+        }
+    ]
+}

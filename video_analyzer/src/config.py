@@ -61,6 +61,11 @@ class VideoAnalyzerConfig:
     # IoU threshold per NMS (modificabile runtime via stream server API)
     yolo_iou: float = float(os.getenv("YOLO_IOU", "0.45"))
 
+    # Configurazione moduli di analisi
+    # Path del file JSON che definisce quali moduli sono attivi e la loro configurazione.
+    # Gestito dal backend via API e aggiornato in modules.json prima del reload.
+    modules_file: str = os.getenv("VA_MODULES_FILE", "data/modules.json")
+
     def __post_init__(self) -> None:
         """Parsing target_classes da env se presente."""
         classes_env = os.getenv("TARGET_CLASSES", "")

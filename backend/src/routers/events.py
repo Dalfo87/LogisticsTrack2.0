@@ -81,11 +81,30 @@ async def stream_events(request: Request):
     )
 
 
+def _apply_rbac_filter(query, user_role: str = "admin", camera_ids: Optional[list[str]] = None):
+    """
+    Predisposizione RBAC: filtro accesso eventi per ruolo e camera.
+
+    Attualmente no-op (single-user admin). Fase 11 implementerà:
+      - user_role == "viewer":    filtra per camera_ids accessibili
+      - user_role == "operator":  filtra per module_type accessibili
+    Il parametro camera_ids è riservato per la Fase 11.
+
+    TODO Fase 11:
+        if user_role == "viewer" and camera_ids:
+            query = query.where(Event.camera_id.in_(camera_ids))
+        if user_role == "module_operator" and module_types:
+            query = query.where(Event.module_type.in_(module_types))
+    """
+    return query  # ora: nessun filtro (single-user admin)
+
+
 @router.get("", response_model=EventListResponse)
 async def list_events(
     camera_id: Optional[str] = Query(None, description="Filtra per camera"),
     aisle_id: Optional[str] = Query(None, description="Filtra per corsia"),
     event_type: Optional[str] = Query(None, description="Filtra per tipo evento"),
+    module_type: Optional[str] = Query(None, description="Filtra per modulo (logistics, no_entry_filter)"),
     track_id: Optional[int] = Query(None, description="Filtra per track ID"),
     validated: Optional[bool] = Query(None, description="Filtra per stato validazione"),
     date_from: Optional[datetime] = Query(None, description="Data inizio (ISO 8601)"),
@@ -98,6 +117,7 @@ async def list_events(
     Lista eventi con filtri e paginazione.
 
     Ordinati per timestamp decrescente (più recenti prima).
+    Supporta filtro per module_type (schema v2.0).
     """
     # Query base
     query = select(Event)
@@ -113,6 +133,10 @@ async def list_events(
     if event_type:
         query = query.where(Event.event_type.ilike(f"%{event_type}%"))
         count_query = count_query.where(Event.event_type.ilike(f"%{event_type}%"))
+    if module_type:
+        # Match esatto (es. "logistics", "no_entry_filter")
+        query = query.where(Event.module_type == module_type)
+        count_query = count_query.where(Event.module_type == module_type)
     if track_id is not None:
         query = query.where(Event.track_id == track_id)
         count_query = count_query.where(Event.track_id == track_id)
@@ -125,6 +149,10 @@ async def list_events(
     if date_to:
         query = query.where(Event.timestamp <= date_to)
         count_query = count_query.where(Event.timestamp <= date_to)
+
+    # Filtro RBAC (predisposizione Fase 11 — ora no-op)
+    query = _apply_rbac_filter(query)
+    count_query = _apply_rbac_filter(count_query)
 
     # Conteggio totale
     total_result = await session.execute(count_query)
@@ -216,9 +244,9 @@ async def get_event_crop(
     if event is None:
         raise HTTPException(status_code=404, detail=f"Evento {event_id} non trovato")
 
-    # Estrai crop_filename da raw_data
-    raw_data = event.raw_data or {}
-    crop_filename = raw_data.get("crop_filename", "")
+    # Estrai crop_filename da event_data (schema v2.0, ex raw_data)
+    event_data = event.event_data or {}
+    crop_filename = event_data.get("crop_filename", "")
 
     if not crop_filename:
         raise HTTPException(status_code=404, detail="Nessun crop disponibile per questo evento")

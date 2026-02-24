@@ -1,6 +1,11 @@
 """
 LogisticsTrack — SQLAlchemy ORM Models
 Mappano le tabelle definite in init.sql.
+
+Versione corrente: supporta architettura multi-modulo (logistics, no_entry_filter).
+- events: +module_type, raw_data → event_data (schema JSONB strutturato v2.0)
+- rois: +module_type (ogni ROI appartiene a un modulo specifico)
+- cameras: +modules_config (configurazione moduli per telecamera, JSONB)
 """
 
 from datetime import datetime
@@ -22,6 +27,10 @@ class Camera(Base):
     rtsp_url: Mapped[str | None] = mapped_column(String(500))
     location: Mapped[str | None] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Configurazione moduli attivi per questa camera (JSONB).
+    # Struttura: {"modules": [{"type": "logistics", "enabled": true, "config": {...}}]}
+    # Esportato in data/modules.json e inviato segnale MQTT reload quando aggiornato.
+    modules_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relazioni
@@ -36,8 +45,12 @@ class ROI(Base):
     camera_id: Mapped[str] = mapped_column(String(50), ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     aisle_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    points: Mapped[dict] = mapped_column(JSONB, nullable=False)  # Array di {x, y}
+    points: Mapped[dict] = mapped_column(JSONB, nullable=False)    # Array di [x, y] in pixel assoluti
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Modulo a cui appartiene questa ROI.
+    # Permette al ROI Editor di filtrare le ROI per modulo.
+    # Valori ammessi: "logistics", "no_entry_filter" (o futuri moduli)
+    module_type: Mapped[str] = mapped_column(String(50), nullable=False, default="logistics")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relazioni
@@ -54,8 +67,14 @@ class Event(Base):
     aisle_id: Mapped[str | None] = mapped_column(String(50))
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, default="forklift_pallet")
 
-    # Dati grezzi AI
-    raw_data: Mapped[dict | None] = mapped_column(JSONB)
+    # Modulo che ha generato l'evento (schema v2.0).
+    # Usato per filtrare eventi via GET /api/events?module_type=...
+    module_type: Mapped[str] = mapped_column(String(50), nullable=False, default="logistics")
+
+    # Dati specifici del modulo (schema v2.0, ex raw_data).
+    # logistics: {roi_id, roi_name, aisle_id, dwell_seconds, reference_point, label, confidence, bbox, crop_filename}
+    # no_entry_filter: {has_vest, upper_color, dwell_seconds, confidence, bbox, crop_filename}
+    event_data: Mapped[dict | None] = mapped_column(JSONB)
 
     # Tracking
     track_id: Mapped[int | None] = mapped_column(Integer)

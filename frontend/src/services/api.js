@@ -126,11 +126,16 @@ export function getCameraSnapshotUrl(cameraId) {
 // ---------------------------------------------------------------------------
 
 /**
- * Lista ROI, con filtro opzionale per camera.
+ * Lista ROI, con filtro opzionale per camera e/o modulo.
+ * @param {string|null} cameraId   - Filtra per camera ID
+ * @param {string|null} moduleType - Filtra per modulo ("logistics", "no_entry_filter", ...)
  */
-export async function fetchROIs(cameraId = null) {
-  const query = cameraId ? `?camera_id=${cameraId}` : '';
-  return request(`/rois${query}`);
+export async function fetchROIs(cameraId = null, moduleType = null) {
+  const params = new URLSearchParams();
+  if (cameraId) params.append('camera_id', cameraId);
+  if (moduleType) params.append('module_type', moduleType);
+  const qs = params.toString();
+  return request(`/rois${qs ? `?${qs}` : ''}`);
 }
 
 /**
@@ -175,6 +180,41 @@ export async function deleteROI(roiId) {
  */
 export async function exportROIs(cameraId) {
   return request(`/rois/export/${cameraId}`, {
+    method: 'POST',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Camera Modules (schema v2.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recupera la configurazione moduli di una camera.
+ * Risposta: {modules: [{type, enabled, config}, ...]}
+ */
+export async function fetchCameraModules(cameraId) {
+  return request(`/cameras/${cameraId}/modules`);
+}
+
+/**
+ * Aggiorna la configurazione moduli di una camera (solo in DB).
+ * Per propagare al video analyzer usare exportCameraModules.
+ * @param {string} cameraId
+ * @param {Object} modulesConfig - {modules: [...]}
+ */
+export async function updateCameraModules(cameraId, modulesConfig) {
+  return request(`/cameras/${cameraId}/modules`, {
+    method: 'PUT',
+    body: JSON.stringify(modulesConfig),
+  });
+}
+
+/**
+ * Esporta la configurazione moduli al video analyzer.
+ * Scrive data/modules.json e invia segnale MQTT reload_modules.
+ */
+export async function exportCameraModules(cameraId) {
+  return request(`/cameras/${cameraId}/modules/export`, {
     method: 'POST',
   });
 }

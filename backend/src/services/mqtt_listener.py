@@ -4,6 +4,9 @@ Sottoscrive il topic MQTT degli eventi del video analyzer,
 parsa il payload JSON e persiste gli eventi su PostgreSQL.
 
 Si avvia come task in background insieme a FastAPI.
+
+Gestisce sia il payload schema v1.0 (legacy, solo modulo logistics)
+sia il payload schema v2.0 (architettura multi-modulo).
 """
 
 import asyncio
@@ -180,47 +183,97 @@ class MQTTListener:
                 await asyncio.sleep(1.0)
 
     async def _persist_event(self, payload: dict) -> None:
-        """Persiste un singolo evento MQTT su PostgreSQL."""
+        """
+        Persiste un singolo evento MQTT su PostgreSQL.
+
+        Supporta sia schema v1.0 (legacy, solo logistics) sia v2.0 (multi-modulo).
+
+        Schema v1.0 (retrocompatibilità):
+            {schema_version: "1.0", event_type, camera_id, aisle_id, roi_id, roi_name,
+             track_id, confidence, bbox, reference_point, dwell_seconds, ...}
+
+        Schema v2.0 (multi-modulo):
+            {schema_version: "2.0", module_type, event_type, camera_id, track_id,
+             confidence, bbox, crop_filename, event_data: {...dati modulo-specifici...}}
+        """
         try:
+            schema_version = payload.get("schema_version", "1.0")
             event_type = payload.get("event_type", "unknown")
             timestamp_str = payload.get("timestamp")
             camera_id = payload.get("camera_id", "unknown")
-            aisle_id = payload.get("aisle_id")
             track_id = payload.get("track_id")
-            dwell_seconds = payload.get("dwell_seconds", 0.0)
 
             # Parse timestamp ISO 8601
             timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
 
-            # Costruisci raw_data con tutti i dati del payload
-            raw_data = {
-                "schema_version": payload.get("schema_version"),
-                "roi_id": payload.get("roi_id"),
-                "roi_name": payload.get("roi_name"),
-                "confidence": payload.get("confidence"),
-                "bbox": payload.get("bbox"),
-                "reference_point": payload.get("reference_point"),
-                "dwell_seconds": dwell_seconds,
-                "parent_roi_id": payload.get("parent_roi_id"),
-                "label": payload.get("label", ""),
-                "crop_filename": payload.get("crop_filename", ""),
-            }
+            # -------------------------------------------------------------------
+            # Schema v2.0 — architettura multi-modulo
+            # -------------------------------------------------------------------
+            if schema_version == "2.0":
+                module_type = payload.get("module_type", "logistics")
+                # Copia difensiva: non mutare il payload originale
+                event_data = dict(payload.get("event_data") or {})
 
-            # Determina entered_at/exited_at in base al tipo evento
-            entered_at = None
-            exited_at = None
-            if event_type == "roi_enter":
-                entered_at = timestamp
-            elif event_type == "roi_exit":
-                exited_at = timestamp
+                # Merge campi top-level nel dict event_data prima di salvare su DB.
+                # Nel payload v2.0, confidence e crop_filename sono top-level (non in event_data),
+                # ma il frontend li cerca in event_data. setdefault non sovrascrive se già presenti.
+                event_data.setdefault("confidence", payload.get("confidence", 0.0))
+                event_data.setdefault("crop_filename", payload.get("crop_filename", ""))
 
+                # Estrai aisle_id da event_data (per compatibilità query filtro)
+                aisle_id = event_data.get("aisle_id")
+
+                # Determina entered_at/exited_at in base al tipo evento
+                entered_at = None
+                exited_at = None
+                if event_type == "roi_enter":
+                    entered_at = timestamp
+                elif event_type == "roi_exit":
+                    exited_at = timestamp
+
+                dwell_seconds = event_data.get("dwell_seconds", 0.0)
+
+            # -------------------------------------------------------------------
+            # Schema v1.0 — legacy (solo modulo logistics)
+            # -------------------------------------------------------------------
+            else:
+                module_type = "logistics"
+                aisle_id = payload.get("aisle_id")
+                dwell_seconds = payload.get("dwell_seconds", 0.0)
+
+                # Pack campi v1.0 in event_data (schema unificato)
+                event_data = {
+                    "roi_id": payload.get("roi_id"),
+                    "roi_name": payload.get("roi_name"),
+                    "aisle_id": aisle_id,
+                    "dwell_seconds": dwell_seconds,
+                    "reference_point": payload.get("reference_point"),
+                    "parent_roi_id": payload.get("parent_roi_id"),
+                    "label": payload.get("label", ""),
+                    "confidence": payload.get("confidence"),
+                    "bbox": payload.get("bbox"),
+                    "crop_filename": payload.get("crop_filename", ""),
+                }
+
+                # Determina entered_at/exited_at in base al tipo evento
+                entered_at = None
+                exited_at = None
+                if event_type == "roi_enter":
+                    entered_at = timestamp
+                elif event_type == "roi_exit":
+                    exited_at = timestamp
+
+            # -------------------------------------------------------------------
+            # Persistenza DB
+            # -------------------------------------------------------------------
             async with async_session() as session:
                 stmt = insert(Event).values(
                     timestamp=timestamp,
                     camera_id=camera_id,
                     aisle_id=aisle_id,
                     event_type=event_type,
-                    raw_data=raw_data,
+                    module_type=module_type,
+                    event_data=event_data,
                     track_id=track_id,
                     entered_at=entered_at,
                     exited_at=exited_at,
@@ -230,26 +283,29 @@ class MQTTListener:
 
             self._events_persisted += 1
             logger.info(
-                f"Evento persistito: {event_type} | "
+                f"Evento persistito [{schema_version}]: {module_type}/{event_type} | "
                 f"track={track_id} | camera={camera_id} | "
                 f"aisle={aisle_id} | dwell={dwell_seconds:.1f}s "
                 f"[totale: {self._events_persisted}]"
             )
 
-            # Broadcast SSE: invia il payload a tutti i subscriber attivi
+            # -------------------------------------------------------------------
+            # Broadcast SSE: invia a tutti i subscriber attivi
+            # -------------------------------------------------------------------
             if self._sse_subscribers:
-                # Costruisci il dict da trasmettere via SSE
                 sse_data = {
                     "event_type": event_type,
+                    "module_type": module_type,
                     "camera_id": camera_id,
                     "aisle_id": aisle_id,
                     "track_id": track_id,
                     "dwell_seconds": dwell_seconds,
                     "timestamp": timestamp_str,
-                    "roi_name": payload.get("roi_name"),
-                    "confidence": payload.get("confidence"),
-                    "label": payload.get("label", ""),
-                    "crop_filename": payload.get("crop_filename", ""),
+                    # Campi di comodo per il frontend (estratti da event_data)
+                    "roi_name": event_data.get("roi_name"),
+                    "confidence": event_data.get("confidence") or payload.get("confidence"),
+                    "label": event_data.get("label", ""),
+                    "crop_filename": event_data.get("crop_filename", ""),
                 }
                 for q in list(self._sse_subscribers):  # copia lista per sicurezza
                     try:

@@ -32,13 +32,23 @@ router = APIRouter(prefix="/api/rois", tags=["rois"])
 @router.get("", response_model=list[ROIResponse])
 async def list_rois(
     camera_id: Optional[str] = None,
+    module_type: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[ROIResponse]:
-    """Lista ROI, con filtro opzionale per camera."""
+    """
+    Lista ROI, con filtro opzionale per camera e/o modulo.
+
+    Parametri:
+        camera_id:   Filtra per camera ID (match esatto).
+        module_type: Filtra per modulo ("logistics", "no_entry_filter", ...).
+                     Se assente, restituisce ROI di tutti i moduli.
+    """
     query = select(ROI).order_by(ROI.name)
 
     if camera_id:
         query = query.where(ROI.camera_id == camera_id)
+    if module_type:
+        query = query.where(ROI.module_type == module_type)
 
     result = await session.execute(query)
     rois = result.scalars().all()
@@ -98,6 +108,7 @@ async def update_roi(
     roi.aisle_id = data.aisle_id
     roi.points = data.points
     roi.is_active = data.is_active
+    roi.module_type = data.module_type  # schema v2.0
 
     await session.commit()
     await session.refresh(roi)

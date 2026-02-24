@@ -19,6 +19,9 @@ class CameraBase(BaseModel):
     rtsp_url: Optional[str] = Field(None, max_length=500)
     location: Optional[str] = Field(None, max_length=200)
     is_active: bool = True
+    # Configurazione moduli attivi per questa camera (schema v2.0).
+    # Struttura: {"modules": [{"type": "logistics", "enabled": true, "config": {...}}]}
+    modules_config: Optional[dict] = None
 
 
 class CameraCreate(CameraBase):
@@ -41,6 +44,9 @@ class ROIBase(BaseModel):
     aisle_id: str = Field(..., max_length=50, examples=["A-01"])
     points: list[list[float]] = Field(..., examples=[[[100, 200], [400, 200], [400, 600], [100, 600]]])
     is_active: bool = True
+    # Modulo a cui appartiene questa ROI (schema v2.0).
+    # Valori: "logistics", "no_entry_filter" (o futuri moduli)
+    module_type: str = "logistics"
 
 
 class ROICreate(ROIBase):
@@ -63,7 +69,10 @@ class EventBase(BaseModel):
     camera_id: str
     aisle_id: Optional[str] = None
     event_type: str = "forklift_pallet"
-    raw_data: Optional[dict] = None
+    # Modulo che ha generato l'evento (schema v2.0)
+    module_type: str = "logistics"
+    # Dati specifici del modulo (schema v2.0, ex raw_data)
+    event_data: Optional[dict] = None
     track_id: Optional[int] = None
     entered_at: Optional[datetime] = None
     exited_at: Optional[datetime] = None
@@ -112,7 +121,7 @@ class WMSTagResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class MQTTEventPayload(BaseModel):
-    """Schema del payload MQTT pubblicato dal video analyzer."""
+    """Schema del payload MQTT v1.0 (legacy — modulo logistics)."""
     schema_version: str = "1.0"
     timestamp: datetime
     event_type: str
@@ -128,3 +137,24 @@ class MQTTEventPayload(BaseModel):
     parent_roi_id: Optional[str] = None
     label: str = ""
     crop_filename: str = ""
+
+
+class MQTTEventPayloadV2(BaseModel):
+    """
+    Schema del payload MQTT v2.0 — architettura multi-modulo.
+
+    Pubblicato dal video_analyzer per tutti i moduli.
+    Il campo event_data contiene dati specifici del modulo:
+      - logistics:        {roi_id, roi_name, aisle_id, dwell_seconds, reference_point, label}
+      - no_entry_filter:  {has_vest, upper_color, dwell_seconds, confidence}
+    """
+    schema_version: str = "2.0"
+    timestamp: datetime
+    module_type: str                        # "logistics" | "no_entry_filter" | ...
+    event_type: str
+    camera_id: str
+    track_id: int
+    confidence: float
+    bbox: list[int]                         # [x1, y1, x2, y2]
+    crop_filename: str = ""
+    event_data: dict = Field(default_factory=dict)  # dati specifici del modulo

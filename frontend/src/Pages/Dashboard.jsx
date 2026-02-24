@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Wifi,
   WifiOff,
+  Pause,
+  Play,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import DataTable from '../components/DataTable/DataTable';
@@ -33,11 +35,20 @@ export default function Dashboard() {
   const [loading, setLoading]         = useState(true);
   const [refreshing, setRefreshing]   = useState(false);
   const [sseStatus, setSseStatus]     = useState('connecting'); // 'connecting' | 'live' | 'offline'
+  const [isPaused, setIsPaused]       = useState(false);
 
   const sseRef            = useRef(null);
   const reconnectTimer    = useRef(null);
   const pollingInterval   = useRef(null);
   const mountedRef        = useRef(true);
+  const isPausedRef       = useRef(false); // ref per evitare stale closure in es.onmessage
+
+  // Allinea il ref con lo state (il ref è letto nei callback SSE, lo state pilota la UI)
+  const togglePause = useCallback(() => {
+    const next = !isPausedRef.current;
+    isPausedRef.current = next;
+    setIsPaused(next);
+  }, []);
 
   // ── Carica statistiche e lista eventi (polling) ──
   const loadStats = useCallback(async (showSpinner = false) => {
@@ -103,6 +114,7 @@ export default function Dashboard() {
 
     es.onmessage = (e) => {
       if (!mountedRef.current) return;
+      if (isPausedRef.current) return;  // pausa: ignora messaggi SSE senza chiudere la connessione
       try {
         const event = JSON.parse(e.data);
         // Aggiunge il nuovo evento in cima alla lista (max MAX_LIVE_EVENTS)
@@ -151,9 +163,6 @@ export default function Dashboard() {
     // Connetti SSE
     connectSSE();
 
-    // Polling 5s per statistiche (SSE gestisce gli eventi live)
-    pollingInterval.current = setInterval(() => loadStats(), 5000);
-
     return () => {
       mountedRef.current = false;
       clearInterval(pollingInterval.current);
@@ -164,6 +173,17 @@ export default function Dashboard() {
       }
     };
   }, [connectSSE, loadInitialEvents, loadStats]);
+
+  // ── Polling separato: si ferma/riprende in base a isPaused ──
+  useEffect(() => {
+    clearInterval(pollingInterval.current);
+    if (!isPaused) {
+      // Carica subito quando si riprende, poi ogni 5s
+      loadStats();
+      pollingInterval.current = setInterval(() => loadStats(), 5000);
+    }
+    return () => clearInterval(pollingInterval.current);
+  }, [isPaused, loadStats]);
 
   const byType = summary?.by_type || {};
 
@@ -177,24 +197,30 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2 mt-1">
-          {/* Badge SSE */}
-          <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
-            sseStatus === 'live'
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : sseStatus === 'connecting'
-              ? 'bg-slate-700/50 border-slate-600 text-slate-400'
-              : 'bg-red-500/10 border-red-500/30 text-red-400'
-          }`}>
-            {sseStatus === 'live' && (
-              <><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</>
-            )}
-            {sseStatus === 'connecting' && (
-              <><span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />Connessione…</>
-            )}
-            {sseStatus === 'offline' && (
-              <><WifiOff size={10} />Offline</>
-            )}
-          </span>
+          {/* Badge SSE / In pausa */}
+          {isPaused ? (
+            <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />In pausa
+            </span>
+          ) : (
+            <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
+              sseStatus === 'live'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : sseStatus === 'connecting'
+                ? 'bg-slate-700/50 border-slate-600 text-slate-400'
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              {sseStatus === 'live' && (
+                <><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</>
+              )}
+              {sseStatus === 'connecting' && (
+                <><span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />Connessione…</>
+              )}
+              {sseStatus === 'offline' && (
+                <><WifiOff size={10} />Offline</>
+              )}
+            </span>
+          )}
 
           {/* Pulsante refresh manuale */}
           <button
@@ -206,6 +232,19 @@ export default function Dashboard() {
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+
+          {/* Pulsante pausa/riprendi aggiornamento real-time */}
+          <button
+            onClick={togglePause}
+            title={isPaused ? 'Riprendi aggiornamento real-time' : 'Pausa aggiornamento real-time'}
+            className={`p-1.5 rounded-lg border transition-colors ${
+              isPaused
+                ? 'border-amber-500/50 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+            }`}
+          >
+            {isPaused ? <Play size={14} /> : <Pause size={14} />}
           </button>
         </div>
       </div>
@@ -250,9 +289,14 @@ export default function Dashboard() {
           <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
             Ultimi eventi
           </h2>
-          {sseStatus === 'live' && (
+          {sseStatus === 'live' && !isPaused && (
             <span className="text-xs text-slate-600">
               Aggiornamento real-time attivo
+            </span>
+          )}
+          {isPaused && (
+            <span className="text-xs text-amber-700">
+              Aggiornamento in pausa
             </span>
           )}
         </div>

@@ -8,6 +8,7 @@ il restart del processo di analisi.
 """
 
 import asyncio
+import json
 import logging
 import threading
 from pathlib import Path
@@ -47,6 +48,45 @@ _runtime_config: dict = {
     "show_overlay": True,       # Mostra overlay FPS/MQTT sul frame
 }
 _config_lock = threading.Lock()
+
+# File di persistenza: video_analyzer/data/runtime_config.json
+_RUNTIME_CFG_FILE = Path(__file__).resolve().parent.parent / "data" / "runtime_config.json"
+
+
+def _load_persisted_config() -> None:
+    """
+    Carica la configurazione runtime da disco al primo avvio del processo.
+    Aggiorna solo le chiavi presenti sia nel file salvato che in _runtime_config
+    (ignora chiavi sconosciute per forward/backward compatibility).
+    """
+    if not _RUNTIME_CFG_FILE.exists():
+        return
+    try:
+        saved = json.loads(_RUNTIME_CFG_FILE.read_text(encoding="utf-8"))
+        with _config_lock:
+            for key in _runtime_config:
+                if key in saved:
+                    _runtime_config[key] = saved[key]
+        logger.info(f"Runtime config caricato da {_RUNTIME_CFG_FILE.name}")
+    except Exception as e:
+        logger.warning(f"Impossibile caricare runtime config da disco: {e}")
+
+
+def _save_persisted_config() -> None:
+    """
+    Salva la configurazione runtime corrente su disco.
+    Chiamata dopo ogni aggiornamento via PATCH /config.
+    """
+    try:
+        _RUNTIME_CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _config_lock:
+            data = dict(_runtime_config)
+        _RUNTIME_CFG_FILE.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception as e:
+        logger.warning(f"Impossibile salvare runtime config su disco: {e}")
+
 
 # Classi del modello corrente (aggiornate da main.py dopo ogni caricamento)
 _current_model_names: dict[int, str] = {}
@@ -153,6 +193,7 @@ async def update_config(new_cfg: YOLORuntimeConfig):
             elif value is not None:
                 _runtime_config[field_name] = value          # ignora None per gli altri
         current = dict(_runtime_config)
+    _save_persisted_config()  # persiste su disco per sopravvivere ai riavvii
     logger.info(f"Runtime config aggiornata: {current}")
     return current
 
@@ -257,6 +298,9 @@ def start_stream_server(port: int, initial_config: dict | None = None) -> None:
                         sopravvivono al restart del loop principale).
     """
     global _runtime_config, _server_started
+
+    # Ripristina impostazioni salvate (prima del guard: aggiorna la memoria anche su restart loop)
+    _load_persisted_config()
 
     if _server_started:
         logger.info("Stream server già in esecuzione — skip avvio.")

@@ -1,14 +1,15 @@
 /**
  * LogisticsTrack — Navigation Configuration
  * Voci di menu filtrate per ruolo utente.
+ * Supporta voci collassibili con figli (campo children).
  */
 import {
   LayoutDashboard,
   Video,
   CalendarClock,
-  Camera,
-  Layers,
   Settings,
+  Camera,
+  Cpu,
 } from 'lucide-react';
 
 /**
@@ -17,6 +18,8 @@ import {
  * - label: testo visibile
  * - icon: componente Lucide
  * - roles: array di ruoli che vedono questa voce ("admin", "user")
+ * - collapsible: (opzionale) se true, la voce ha un toggle expand/collapse
+ * - children: (opzionale) array di sotto-voci (stessa struttura, no roles)
  */
 export const navigationItems = [
   {
@@ -38,22 +41,15 @@ export const navigationItems = [
     roles: ['admin', 'user'],
   },
   {
-    path: '/cameras',
-    label: 'Camere',
-    icon: Camera,
-    roles: ['admin'],
-  },
-  {
-    path: '/rois',
-    label: 'ROI Editor',
-    icon: Layers,
-    roles: ['admin'],
-  },
-  {
     path: '/settings',
     label: 'Impostazioni',
     icon: Settings,
     roles: ['admin'],
+    collapsible: true,
+    children: [
+      { path: '/settings/cameras', label: 'Telecamere', icon: Camera },
+      { path: '/settings/analyzer', label: 'Video Analyzer', icon: Cpu },
+    ],
   },
 ];
 
